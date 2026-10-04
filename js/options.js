@@ -1,0 +1,537 @@
+// BiliAiNote Options Page Script
+// 提示词管理功能
+
+const DEFAULT_PROMPTS = {
+  clear: { name: '学习指导', prompt: `你是一个学习指导助手，请根据提供的视频字幕文档生成学习指导。
+
+要求：
+1. 仅依据字幕内容生成学习指导，不得补充原文之外的知识。
+2. 使用 Markdown 输出，包含以下部分：
+   - 「学习目标」：学完本视频应掌握的内容（列表）
+   - 「知识脉络」：按视频内容顺序梳理知识结构（分级列表）
+   - 「重点与难点」：需要重点关注或容易混淆的内容（列表）
+   - 「学习建议」：如何巩固所学内容（列表）
+3. 表达自然流畅、客观中立，使用中文。
+
+待整理文档：
+
+{markdown}
+
+直接输出学习指导，不要输出任何额外说明。` },
+
+  summary: { name: '文档总结', prompt: `你是一个文档总结助手，请根据提供的视频字幕文档生成结构化的文档总结。
+
+要求：
+1. 仅依据字幕内容进行总结，不得添加、猜测或推断原文未提及的信息。
+2. 提炼视频的核心主题、主要观点与关键内容，忽略寒暄、口头禅、广告、重复内容等无关信息。
+3. 使用 Markdown 输出，包含「一句话概述」和「核心要点」（要点用列表呈现）两部分。
+4. 表达自然流畅、客观中立，使用中文。
+
+待总结文档：
+
+{markdown}
+
+直接输出总结，不要输出任何额外说明。` }
+};
+
+// ============ 工具函数 ============
+
+function escapeHtml(text) {
+  const el = document.createElement('div');
+  el.textContent = text;
+  return el.innerHTML;
+}
+
+function truncate(text, max) {
+  return text.length > max ? text.substring(0, max) + '...' : text;
+}
+
+// ============ 加载/保存设置 ============
+
+async function loadSettings() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(['BiliAiNote_settings'], (result) => {
+      resolve(result.BiliAiNote_settings || {});
+    });
+  });
+}
+
+async function saveSettings(patch) {
+  const settings = await loadSettings();
+  const merged = { ...settings, ...patch };
+  return new Promise((resolve) => {
+    chrome.storage.local.set({ BiliAiNote_settings: merged }, resolve);
+  });
+}
+
+// ============ 状态 ============
+
+let selectedCardId = null; // null = 新建模式, 'ds'|'summary'|'custom_xxx' = 编辑模式
+
+// ============ 获取所有提示词列表 ============
+
+async function getAllPrompts() {
+  const settings = await loadSettings();
+  const customPrompts = settings.customPrompts || [];
+  const packImagesMap = settings.promptPackImages || {};
+
+  const list = [
+    { id: 'summary', name: settings.deepseekSummaryName || '文档总结', prompt: settings.deepseekSummary || DEFAULT_PROMPTS.summary.prompt, builtin: true, packImages: packImagesMap.summary ?? false },
+    { id: 'clear', name: settings.deepseekPromptName || '学习指导', prompt: settings.deepseekPrompt || DEFAULT_PROMPTS.clear.prompt, builtin: true, packImages: packImagesMap.clear ?? true }
+  ];
+
+  customPrompts.forEach(p => {
+    list.push({ id: p.id, name: p.name, prompt: p.prompt, builtin: false, packImages: p.packImages ?? false });
+  });
+
+  return list;
+}
+
+// ============ 渲染卡片网格 ============
+
+async function renderPromptCards() {
+  const grid = document.getElementById('prompt-grid');
+  if (!grid) return;
+
+  const prompts = await getAllPrompts();
+
+  grid.innerHTML = prompts.map(p => `
+    <div class="prompt-card${selectedCardId === p.id ? ' selected' : ''}" data-id="${p.id}">
+      <div class="prompt-card-header">
+        <span class="prompt-card-name">${escapeHtml(p.name)}</span>
+        <span class="prompt-card-badge ${p.builtin ? 'builtin' : 'custom'}">${p.builtin ? '内置' : '自定义'}</span>
+        <div style="position: relative;">
+          <button class="more-btn" data-id="${p.id}" title="更多">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg>
+          </button>
+          <div class="dropdown" data-id="${p.id}">
+            ${p.builtin ? `<button class="dropdown-item reset-btn" data-id="${p.id}">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+              重置
+            </button>` : `<button class="dropdown-item danger delete-btn" data-id="${p.id}">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3,6 5,6 21,6"/><path d="M19,6v14a2,2,0,0,1-2,2H7a2,2,0,0,1-2-2V6m3,0V4a2,2,0,0,1,2-2h4a2,2,0,0,1,2,2V6"/></svg>
+              删除
+            </button>`}
+          </div>
+        </div>
+      </div>
+      <p class="prompt-card-preview">${escapeHtml(truncate(p.prompt, 80))}</p>
+    </div>
+  `).join('');
+
+  // 绑定卡片点击事件
+  grid.querySelectorAll('.prompt-card').forEach(card => {
+    card.addEventListener('click', (e) => {
+      if (e.target.closest('.more-btn') || e.target.closest('.dropdown')) return;
+      selectCard(card.dataset.id);
+    });
+  });
+
+  // 绑定更多按钮
+  grid.querySelectorAll('.more-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      // 关闭其他下拉菜单
+      grid.querySelectorAll('.dropdown').forEach(d => d.classList.remove('show'));
+      btn.nextElementSibling.classList.toggle('show');
+    });
+  });
+
+  // 绑定重置按钮
+  grid.querySelectorAll('.reset-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      resetPrompt(btn.dataset.id);
+      btn.closest('.dropdown').classList.remove('show');
+    });
+  });
+
+  // 绑定删除按钮
+  grid.querySelectorAll('.delete-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      deleteCustomPrompt(btn.dataset.id);
+      btn.closest('.dropdown').classList.remove('show');
+    });
+  });
+}
+
+// ============ 选中卡片 ============
+
+async function selectCard(id) {
+  selectedCardId = id;
+  const prompts = await getAllPrompts();
+  const p = prompts.find(item => item.id === id);
+  if (!p) return;
+
+  document.getElementById('edit-content').value = p.prompt;
+  document.getElementById('edit-name').value = p.name;
+  document.getElementById('edit-pack-images').checked = p.packImages;
+
+  document.getElementById('edit-title').textContent = '编辑提示词';
+
+  document.getElementById('btn-cancel').classList.add('show');
+  updateSaveButton();
+
+  // 更新卡片选中状态
+  document.querySelectorAll('.prompt-card').forEach(c => {
+    c.classList.toggle('selected', c.dataset.id === id);
+  });
+}
+
+// ============ 取消选中（回到新建模式） ============
+
+function resetToCreateMode() {
+  selectedCardId = null;
+  document.getElementById('edit-content').value = '';
+  document.getElementById('edit-name').value = '';
+  document.getElementById('edit-pack-images').checked = false;
+
+  document.getElementById('edit-title').textContent = '新建提示词';
+
+  document.getElementById('btn-cancel').classList.remove('show');
+  updateSaveButton();
+
+  document.querySelectorAll('.prompt-card').forEach(c => c.classList.remove('selected'));
+}
+
+// ============ 更新保存按钮状态 ============
+
+function updateSaveButton() {
+  const name = document.getElementById('edit-name').value.trim();
+  const content = document.getElementById('edit-content').value.trim();
+  document.getElementById('btn-save').disabled = !(name && content);
+}
+
+// ============ 保存提示词 ============
+
+async function savePrompt() {
+  const name = document.getElementById('edit-name').value.trim();
+  const content = document.getElementById('edit-content').value.trim();
+  const packImages = document.getElementById('edit-pack-images').checked;
+  if (!name || !content) return;
+
+  if (selectedCardId) {
+    // 编辑模式
+    if (selectedCardId === 'clear') {
+      const settings = await loadSettings();
+      const packImagesMap = settings.promptPackImages || {};
+      packImagesMap.clear = packImages;
+      await saveSettings({ deepseekPrompt: content, deepseekPromptName: name, promptPackImages: packImagesMap });
+    } else if (selectedCardId === 'summary') {
+      const settings = await loadSettings();
+      const packImagesMap = settings.promptPackImages || {};
+      packImagesMap.summary = packImages;
+      await saveSettings({ deepseekSummary: content, deepseekSummaryName: name, promptPackImages: packImagesMap });
+    } else {
+      // 自定义提示词
+      const settings = await loadSettings();
+      const customPrompts = settings.customPrompts || [];
+      const index = customPrompts.findIndex(p => p.id === selectedCardId);
+      if (index !== -1) {
+        customPrompts[index] = { ...customPrompts[index], name, prompt: content, packImages };
+        await saveSettings({ customPrompts });
+      }
+    }
+  } else {
+    // 新建模式
+    const settings = await loadSettings();
+    const customPrompts = settings.customPrompts || [];
+    const id = 'custom_' + Date.now();
+    customPrompts.push({ id, name, prompt: content, packImages });
+    await saveSettings({ customPrompts });
+  }
+
+  await renderPromptCards();
+  resetToCreateMode();
+}
+
+// ============ 重置提示词 ============
+
+async function resetPrompt(id) {
+  if (id === 'clear') {
+    await saveSettings({ deepseekPrompt: DEFAULT_PROMPTS.clear.prompt, deepseekPromptName: null });
+  } else if (id === 'summary') {
+    await saveSettings({ deepseekSummary: DEFAULT_PROMPTS.summary.prompt, deepseekSummaryName: null });
+  } else {
+    // 自定义提示词重置 = 删除
+    await deleteCustomPrompt(id);
+    return;
+  }
+
+  // 如果当前正在编辑这个提示词，刷新编辑区
+  if (selectedCardId === id) {
+    const prompts = await getAllPrompts();
+    const p = prompts.find(item => item.id === id);
+    if (p) {
+      document.getElementById('edit-content').value = p.prompt;
+      document.getElementById('edit-name').value = p.name;
+    }
+  }
+
+  await renderPromptCards();
+}
+
+// ============ 删除自定义提示词 ============
+
+async function deleteCustomPrompt(id) {
+  if (!confirm('确定删除此提示词？')) return;
+
+  const settings = await loadSettings();
+  const customPrompts = (settings.customPrompts || []).filter(p => p.id !== id);
+  await saveSettings({ customPrompts });
+
+  if (selectedCardId === id) {
+    resetToCreateMode();
+  }
+
+  await renderPromptCards();
+}
+
+// ============ 历史记录 ============
+
+function formatTime(timestamp) {
+  const date = new Date(timestamp);
+  const now = new Date();
+  const diff = now - date;
+
+  if (diff < 60000) return '刚刚';
+  if (diff < 3600000) return Math.floor(diff / 60000) + '分钟前';
+  if (diff < 86400000) return Math.floor(diff / 3600000) + '小时前';
+  if (diff < 604800000) return Math.floor(diff / 86400000) + '天前';
+
+  return date.toLocaleDateString('zh-CN');
+}
+
+function getPromptName(promptType) {
+  // 从 chrome.storage.local 获取提示词名称
+  return new Promise((resolve) => {
+    chrome.storage.local.get('BiliAiNote_settings', (result) => {
+      const settings = result.BiliAiNote_settings || {};
+      if (promptType === 'summary') {
+        resolve(settings.deepseekSummaryName || '文档总结');
+      } else if (promptType === 'clear') {
+        resolve(settings.deepseekPromptName || '学习指导');
+      } else {
+        const customPrompts = settings.customPrompts || [];
+        const custom = customPrompts.find(p => p.id === promptType);
+        resolve(custom ? custom.name : promptType);
+      }
+    });
+  });
+}
+
+async function renderHistory() {
+  const cache = window.BiliAiNote.cache;
+  if (!cache) return;
+
+  const listEl = document.getElementById('history-list');
+  if (!listEl) return;
+
+  const videos = await cache.getRecentVideos();
+
+  if (videos.length === 0) {
+    listEl.innerHTML = '<div class="history-empty">暂无整理记录</div>';
+    return;
+  }
+
+  // 预加载所有提示词名称
+  const promptNameCache = {};
+  const allPromptTypes = [...new Set(videos.flatMap(v => v.promptTypes))];
+  await Promise.all(allPromptTypes.map(async (t) => {
+    promptNameCache[t] = await getPromptName(t);
+  }));
+
+  listEl.innerHTML = videos.map(video => {
+    const pageParam = video.pageIndex > 1 ? `?p=${video.pageIndex}` : '';
+    const videoUrl = `https://www.bilibili.com/video/${video.bvid}${pageParam}`;
+    return `
+    <div class="history-card">
+      <div class="history-header">
+        <div class="history-title">${escapeHtml(video.title)}</div>
+        <div class="history-time">${formatTime(video.timestamp)}</div>
+      </div>
+      <div class="history-meta">
+        <a class="history-bvid" href="${videoUrl}" target="_blank">${video.bvid}${video.pageIndex > 1 ? ' P' + video.pageIndex : ''}</a>
+        <span class="history-prompt-types">
+          ${video.promptTypes.map(t => `<span class="history-tag clickable" data-bvid="${video.bvid}" data-page="${video.pageIndex}" data-prompt="${t}">${escapeHtml(promptNameCache[t])}</span>`).join('')}
+        </span>
+      </div>
+    </div>
+    `;
+  }).join('');
+
+  // 绑定提示词标签点击事件
+  listEl.querySelectorAll('.history-tag.clickable').forEach(tag => {
+    tag.addEventListener('click', () => {
+      const bvid = tag.dataset.bvid;
+      const pageIndex = parseInt(tag.dataset.page);
+      const promptType = tag.dataset.prompt;
+      showSinglePromptModal(bvid, pageIndex, promptType);
+    });
+  });
+}
+
+async function showSinglePromptModal(bvid, pageIndex, promptType) {
+  const cache = window.BiliAiNote.cache;
+  const data = await cache.getCache(bvid, pageIndex);
+  if (!data || !data[promptType]) return;
+
+  const result = data[promptType];
+  const promptName = await getPromptName(promptType);
+
+  // 创建或复用模态框
+  let modal = document.getElementById('history-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'history-modal';
+    modal.className = 'history-modal';
+    modal.innerHTML = `
+      <div class="history-modal-content">
+        <div class="history-modal-header">
+          <span class="history-modal-title"></span>
+          <button class="history-modal-close">✕</button>
+        </div>
+        <div class="history-modal-body"></div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+
+    modal.querySelector('.history-modal-close').addEventListener('click', () => {
+      modal.classList.remove('show');
+    });
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) modal.classList.remove('show');
+    });
+  }
+
+  // 更新标题和内容
+  modal.querySelector('.history-modal-title').textContent = promptName;
+  modal.querySelector('.history-modal-body').innerHTML = `
+    <div class="history-result-content">${escapeHtml(result.response)}</div>
+  `;
+
+  modal.classList.add('show');
+}
+
+async function showHistoryModal(bvid, pageIndex, data) {
+  // 创建模态框
+  let modal = document.getElementById('history-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'history-modal';
+    modal.className = 'history-modal';
+    modal.innerHTML = `
+      <div class="history-modal-content">
+        <div class="history-modal-header">
+          <span class="history-modal-title">整理结果</span>
+          <button class="history-modal-close">✕</button>
+        </div>
+        <div class="history-modal-body"></div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+
+    modal.querySelector('.history-modal-close').addEventListener('click', () => {
+      modal.classList.remove('show');
+    });
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) modal.classList.remove('show');
+    });
+  }
+
+  // 预加载所有提示词名称
+  const promptNames = {};
+  await Promise.all(Object.keys(data).map(async (promptType) => {
+    promptNames[promptType] = await getPromptName(promptType);
+  }));
+
+  // 按时间戳排序（最新在前）
+  const sortedEntries = Object.entries(data).sort((a, b) => {
+    return (b[1].timestamp || 0) - (a[1].timestamp || 0);
+  });
+
+  const body = modal.querySelector('.history-modal-body');
+  body.innerHTML = sortedEntries.map(([promptType, result]) => `
+    <div class="history-result-item">
+      <div class="history-result-label">${escapeHtml(promptNames[promptType])}</div>
+      <div class="history-result-content">${escapeHtml(result.response)}</div>
+    </div>
+  `).join('');
+
+  modal.classList.add('show');
+}
+
+async function deleteHistory(bvid, pageIndex) {
+  if (!confirm('确定删除这条记录？')) return;
+
+  const cache = window.BiliAiNote.cache;
+  await cache.deleteCache(bvid, pageIndex);
+  await renderHistory();
+}
+
+// ============ 关于页面 ============
+
+function renderAboutPage() {
+  // 版本号
+  const versionEl = document.getElementById('about-version');
+  if (versionEl) {
+    const manifest = chrome.runtime.getManifest();
+    versionEl.textContent = 'v' + manifest.version;
+  }
+}
+
+// ============ 初始化 ============
+
+document.addEventListener('DOMContentLoaded', async () => {
+  // 导航切换
+  const navItems = document.querySelectorAll('.nav-item');
+  const sections = document.querySelectorAll('.section');
+
+  navItems.forEach(item => {
+    item.addEventListener('click', () => {
+      const sectionId = item.getAttribute('data-section');
+      navItems.forEach(nav => nav.classList.remove('active'));
+      sections.forEach(sec => sec.classList.remove('active'));
+      item.classList.add('active');
+      document.getElementById('section-' + sectionId).classList.add('active');
+      if (sectionId === 'history') {
+        renderHistory();
+      }
+    });
+  });
+
+  // 渲染卡片
+  await renderPromptCards();
+
+  // 渲染关于页面
+  renderAboutPage();
+
+  // 检查 URL 参数，自动切换到指定 section
+  const urlParams = new URLSearchParams(window.location.search);
+  const sectionParam = urlParams.get('section');
+  if (sectionParam) {
+    const targetNav = document.querySelector(`.nav-item[data-section="${sectionParam}"]`);
+    if (targetNav) {
+      targetNav.click();
+    }
+  }
+
+  // 输入监听
+  document.getElementById('edit-name').addEventListener('input', updateSaveButton);
+  document.getElementById('edit-content').addEventListener('input', updateSaveButton);
+
+  // 保存按钮
+  document.getElementById('btn-save').addEventListener('click', savePrompt);
+
+  // 取消按钮
+  document.getElementById('btn-cancel').addEventListener('click', resetToCreateMode);
+
+  // 点击其他地方关闭下拉菜单
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.more-btn') && !e.target.closest('.dropdown')) {
+      document.querySelectorAll('.dropdown').forEach(d => d.classList.remove('show'));
+    }
+  });
+
+});

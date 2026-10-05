@@ -165,6 +165,16 @@
       s.subtitles = bundle.subtitles || [];
       s.chapters = bundle.chapters || [];
 
+      // API 无章节时恢复 AI 生成的章节
+      if (!s.chapters.length && window.BiliAiNote.chapter?.loadSavedChapters) {
+        const saved = await window.BiliAiNote.chapter.loadSavedChapters(s.bvid, s.pageIndex || 1);
+        if (runId !== s.fetchRunId) return; // 请求已过期
+        if (saved && saved.length) {
+          s.chapters = saved;
+          window.BiliAiNote.panel.showToast('已恢复AI生成章节');
+        }
+      }
+
       // 渲染视频信息
       if (window.BiliAiNote.videoInfo) {
         window.BiliAiNote.videoInfo.render();
@@ -194,6 +204,8 @@
           renderSubtitleList();
           startSync();
           markTranscribeSource();
+          // 字幕就绪后刷新章节页（AI 生成章节按钮依赖字幕）
+          if (window.BiliAiNote.chapter) window.BiliAiNote.chapter.render();
           panel.showToast('已恢复语音转写字幕');
           return;
         }
@@ -235,6 +247,8 @@
       s.selectedSubtitleLang = lang || '';
       renderSubtitleList();
       startSync();
+      // 字幕就绪后刷新章节页（AI 生成章节按钮依赖字幕）
+      if (window.BiliAiNote.chapter) window.BiliAiNote.chapter.render();
       // 更新语言选择按钮显示
       panel.updateSubtitleSelect(s.subtitles, s.selectedSubtitleUrl);
     } catch (err) {
@@ -597,6 +611,8 @@
     renderSubtitleList();
     startSync();
     markTranscribeSource();
+    // 字幕就绪后刷新章节页（AI 生成章节按钮依赖字幕）
+    if (window.BiliAiNote.chapter) window.BiliAiNote.chapter.render();
     window.BiliAiNote.panel.showToast('语音转写完成，已生成字幕');
   }
 

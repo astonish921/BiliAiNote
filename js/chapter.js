@@ -9,6 +9,251 @@
 
   let chapterListenerAttached = false;
 
+  // ── AI 智能生成章节（复用 background ai-generate 通道，sceneId = chapters） ──
+
+  const CHAPTER_SCENE = 'chapters';
+
+  const gen = {
+    state: 'idle', // idle | generating | error
+    text: '',
+    error: '',
+    requestId: null
+  };
+
+  const CHAPTER_PROMPT = `你是视频章节规划助手，请根据提供的带时间戳的字幕文本为视频划分章节。
+
+要求：
+1. 仅依据字幕内容划分章节，每章主题明确；数量适中（3~15 个，内容简短则更少）。
+2. 每行输出格式：- [MM:SS] 章节标题（视频超过1小时用 HH:MM:SS）。
+3. 章节时间必须取自字幕中出现的时间戳，按时间升序排列。
+4. 直接输出章节列表，不要输出任何额外说明。
+
+待划分字幕：
+
+{markdown}`;
+
+  // 空态/AI生成态渲染：无法获取章节 + AI智能生成按钮（或生成中）
+  function renderGenState(container) {
+    if (gen.state === 'generating') {
+      container.innerHTML = `
+        <div class="bn-transcribe-box">
+          <div class="bn-transcribe-head">
+            <span class="bn-transcribe-status">AI 正在生成章节…</span>
+            <button class="bn-transcribe-stop" data-action="stop-gen-chapters">停止</button>
+          </div>
+        </div>
+      `;
+      return;
+    }
+
+    const s = window.BiliAiNote.state;
+    const hasSubtitle = !!(s.subtitleBody || []).length;
+    const hasLlm = !!window.BiliAiNote.settings?.getActiveLlm?.();
+    const disabled = (!hasSubtitle || !hasLlm) ? ' disabled' : '';
+    const hint = !hasSubtitle
+      ? '<div class="bn-transcribe-client-hint">请先生成字幕</div>'
+      : (!hasLlm ? '<div class="bn-transcribe-client-hint">请先在「设置」中启用 LLM</div>' : '');
+
+    container.innerHTML = `
+      <div class="bn-empty">
+        ${gen.state === 'error' && gen.error ? `<div class="bn-transcribe-error">${escapeHtml(gen.error)}</div>` : ''}
+        <div class="bn-empty-text">无法自动获取B站的章节</div>
+        <button class="bn-transcribe-btn" data-action="gen-chapters"${disabled}>AI智能生成</button>
+        ${hint}
+      </div>
+    `;
+  }
+
+  // 构造带时间戳的字幕文本（供 LLM 划分章节）
+  function buildSubtitleText() {
+    const s = window.BiliAiNote.state;
+    const lines = [];
+    (s.subtitleBody || []).forEach(it => {
+      const text = String(it.content || '').trim();
+      if (text) lines.push(`[${formatTime(it.from)}] ${text}`);
+    });
+    return lines.join('\n');
+  }
+
+  function startGenChapters() {
+    if (gen.state === 'generating') return;
+    const s = window.BiliAiNote.state;
+    if (!(s.subtitleBody || []).length) return;
+
+    gen.state = 'generating';
+    gen.text = '';
+    gen.error = '';
+    gen.requestId = null;
+
+    const container = document.getElementById('bn-chapter-list');
+    if (container) renderGenState(container);
+    window.BiliAiNote.panel.showToast('已发起章节生成请求');
+
+    try {
+      chrome.runtime.sendMessage(
+        { type: 'ai-generate', sceneId: CHAPTER_SCENE, content: buildSubtitleText(), prompt: CHAPTER_PROMPT },
+        (resp) => {
+          if (chrome.runtime.lastError || !resp || !resp.ok) {
+            gen.error = (resp && resp.error) || (chrome.runtime.lastError && chrome.runtime.lastError.message) || '请求失败';
+            gen.state = 'error';
+            const c = document.getElementById('bn-chapter-list');
+            if (c) renderGenState(c);
+            return;
+          }
+          gen.requestId = resp.requestId;
+        }
+      );
+    } catch (e) {
+      // Extension context invalidated
+      gen.error = '扩展已重新加载，请刷新本页面后重试';
+      gen.state = 'error';
+      const c = document.getElementById('bn-chapter-list');
+      if (c) renderGenState(c);
+    }
+  }
+
+  function stopGenChapters() {
+    try {
+      chrome.runtime.sendMessage({ type: 'ai-abort', sceneId: CHAPTER_SCENE, requestId: gen.requestId });
+    } catch {}
+    gen.state = 'idle';
+    gen.text = '';
+    gen.requestId = null;
+    const c = document.getElementById('bn-chapter-list');
+    if (c) renderGenState(c);
+  }
+
+  // 时间文本 → 秒
+  function parseTs(str) {
+    const parts = String(str).trim().split(':').map(Number);
+    if (!parts.length || parts.some(n => Number.isNaN(n))) return -1;
+    let sec = 0;
+    for (const p of parts) sec = sec * 60 + p;
+    return sec;
+  }
+
+  // 解析 AI 输出为章节：兼容 - [MM:SS] 标题 / 1. [MM:SS] 标题 / ### [MM:SS] 标题 等格式
+  function parseChapters(text) {
+    const items = [];
+    const re = /^\s*(?:[-*+•·]|\d{1,2}[.)]|#{1,6})?\s*\[?(\d{1,2}:\d{2}(?::\d{2})?)\]?\s*[-–—:.、\]]*\s*(.+?)\s*$/gm;
+    for (const m of String(text || '').matchAll(re)) {
+      const from = parseTs(m[1]);
+      const title = String(m[2] || '')
+        .replace(/^#{1,6}\s*/, '')
+        .replace(/\*\*/g, '')
+        .trim();
+      if (from < 0 || !title) continue;
+      items.push({ from, to: null, title });
+    }
+
+    // 按时间升序 + 去掉同一时间戳的重复章节
+    items.sort((a, b) => a.from - b.from);
+    const dedup = [];
+    for (const it of items) {
+      if (dedup.length && dedup[dedup.length - 1].from === it.from) continue;
+      dedup.push(it);
+    }
+
+    // 补齐结束时间：下一章起点，末章取视频时长
+    const duration = window.BiliAiNote.state.videoDuration || 0;
+    for (let i = 0; i < dedup.length; i++) {
+      const next = dedup[i + 1];
+      dedup[i].to = next ? next.from : (duration > dedup[i].from ? duration : dedup[i].from + 60);
+    }
+    return dedup;
+  }
+
+  // 生成完成：解析并持久化
+  function finishGenChapters() {
+    const s = window.BiliAiNote.state;
+    const items = parseChapters(gen.text);
+    if (!items.length) {
+      gen.error = '未能从生成结果中解析出章节';
+      gen.state = 'error';
+      const c = document.getElementById('bn-chapter-list');
+      if (c) renderGenState(c);
+      window.BiliAiNote.panel.showToast(gen.error);
+      return;
+    }
+    gen.state = 'idle';
+    gen.text = '';
+    gen.requestId = null;
+    s.chapters = items;
+    saveChapters(s.bvid, s.pageIndex || 1, items).catch(() => {});
+    render();
+    window.BiliAiNote.panel.showToast('章节生成完成');
+  }
+
+  // 监听 background 推送的 ai-* 消息（仅处理 chapters 场景）
+  try {
+    chrome.runtime.onMessage.addListener((msg) => {
+      if (!msg || !msg.type || msg.sceneId !== CHAPTER_SCENE) return;
+      if (gen.state !== 'generating') return;
+      if (gen.requestId && msg.requestId && gen.requestId !== msg.requestId) return;
+
+      switch (msg.type) {
+        case 'ai-chunk':
+          gen.text += msg.text || '';
+          break;
+        case 'ai-done':
+          finishGenChapters();
+          break;
+        case 'ai-error':
+          gen.error = msg.error || '生成失败';
+          gen.state = 'error';
+          renderGenState(document.getElementById('bn-chapter-list') || document.createElement('div'));
+          window.BiliAiNote.panel.showToast('章节生成失败：' + gen.error);
+          break;
+        case 'ai-aborted':
+          gen.state = 'idle';
+          gen.text = '';
+          gen.requestId = null;
+          renderGenState(document.getElementById('bn-chapter-list') || document.createElement('div'));
+          window.BiliAiNote.panel.showToast('已停止生成');
+          break;
+      }
+    });
+  } catch {}
+
+  // ── AI 章节持久化（chrome.storage.local，按 bvid+分P 分组） ──
+
+  const CHAPTERS_KEY = 'BiliAiNote_chapters';
+  const CHAPTERS_MAX = 30;
+
+  function chaptersKey(bvid, pageIndex) {
+    return `${bvid}_p${pageIndex || 1}`;
+  }
+
+  function loadSavedChapters(bvid, pageIndex) {
+    return new Promise(resolve => {
+      chrome.storage.local.get([CHAPTERS_KEY], result => {
+        const map = (result && result[CHAPTERS_KEY]) || {};
+        const entry = map[chaptersKey(bvid, pageIndex)];
+        resolve(entry && Array.isArray(entry.items) && entry.items.length ? entry.items : null);
+      });
+    });
+  }
+
+  function saveChapters(bvid, pageIndex, items) {
+    return new Promise(resolve => {
+      chrome.storage.local.get([CHAPTERS_KEY], result => {
+        const map = (result && result[CHAPTERS_KEY]) || {};
+        if (items && items.length) {
+          map[chaptersKey(bvid, pageIndex)] = { items, at: Date.now() };
+        } else {
+          delete map[chaptersKey(bvid, pageIndex)];
+        }
+        // 超出上限时淘汰最旧视频的记录
+        const keys = Object.keys(map);
+        if (keys.length > CHAPTERS_MAX) {
+          keys.sort((a, b) => (map[a].at || 0) - (map[b].at || 0));
+          for (const k of keys.slice(0, keys.length - CHAPTERS_MAX)) delete map[k];
+        }
+        chrome.storage.local.set({ [CHAPTERS_KEY]: map }, () => resolve());
+      });
+    });
+  }
+
   function render() {
     const s = window.BiliAiNote.state;
     const container = document.getElementById('bn-chapter-list');
@@ -23,7 +268,7 @@
     }
 
     if (!s.chapters || s.chapters.length === 0) {
-      container.innerHTML = '<div class="bn-empty">当前视频无章节</div>';
+      renderGenState(container);
       return;
     }
 
@@ -82,6 +327,17 @@
     }
 
     if (!btn) return;
+
+    // AI 生成章节按钮（不在章节行内）
+    const action0 = btn.dataset.action;
+    if (action0 === 'gen-chapters') {
+      startGenChapters();
+      return;
+    }
+    if (action0 === 'stop-gen-chapters') {
+      stopGenChapters();
+      return;
+    }
 
     const row = btn.closest('.bn-row') || btn.closest('.bn-row-img');
     if (!row) return;
@@ -218,6 +474,7 @@
   window.BiliAiNote.chapter = {
     render,
     jumpToChapter,
-    formatTime
+    formatTime,
+    loadSavedChapters
   };
 })();

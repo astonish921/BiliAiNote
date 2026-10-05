@@ -390,6 +390,88 @@
   word-break: break-all;
 }
 
+/* 字幕搜索栏 */
+.bn-search-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  background: var(--bn-footer-bg);
+  border-bottom: 1px solid var(--bn-border);
+  /* 悬浮在滚动区顶部，不随字幕列表滚走 */
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+
+.bn-search-icon {
+  flex-shrink: 0;
+  color: var(--bn-text-sub);
+}
+
+.bn-search-bar input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--bn-btn-border);
+  border-radius: 4px;
+  background: var(--bn-btn-bg);
+  color: var(--bn-text);
+  font-size: var(--bn-font-size);
+  padding: 3px 6px;
+  outline: none;
+}
+
+.bn-search-bar input:focus {
+  border-color: var(--bn-accent);
+}
+
+.bn-search-count {
+  flex-shrink: 0;
+  color: var(--bn-text-sub);
+  font-size: 0.92em;
+  white-space: nowrap;
+}
+
+.bn-search-nav {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--bn-text-sub);
+  cursor: pointer;
+}
+
+.bn-search-nav:hover {
+  background: var(--bn-hover);
+  color: var(--bn-text);
+}
+
+/* 搜索态的行 */
+.bn-row.bn-search-dim,
+.bn-row-img.bn-search-dim {
+  opacity: 0.45;
+}
+
+.bn-row.bn-search-current,
+.bn-row-img.bn-search-current {
+  background: var(--bn-highlight);
+  box-shadow: inset 2px 0 0 var(--bn-accent);
+}
+
+.bn-search-mark {
+  background: #f7dc6f;
+  color: #333;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+
 /* 带截图的行 */
 .bn-row-img {
   display: flex;

@@ -111,6 +111,8 @@
       s.reset();
     }
     s.bvid = newBvid;
+    // 换视频/手动刷新后清空搜索状态
+    clearSearchState();
 
     // 每次刷新递增 runId，取消过期请求
     const runId = ++s.fetchRunId;
@@ -233,6 +235,8 @@
 
   async function switchSubtitle(url, lang) {
     stopSync();
+    // 切换语言后字幕内容变化，清空搜索状态
+    clearSearchState();
     await loadSubtitle(url, lang);
   }
 
@@ -625,6 +629,92 @@
     });
   } catch {}
 
+  // ── 字幕搜索 ──
+
+  const search = {
+    keyword: '',
+    hits: [],  // 命中的行索引（升序）
+    pos: -1    // 当前命中在 hits 中的下标
+  };
+
+  let lastSearchCurrentEl = null;
+
+  function escapeRegExp(str) {
+    return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  // 在已转义的文本中包裹 <mark>；关键词同样先做 HTML 转义，防止注入
+  function highlightText(text) {
+    const safe = escapeHtml(text);
+    if (!search.keyword) return safe;
+    const re = new RegExp(`(${escapeRegExp(escapeHtml(search.keyword))})`, 'gi');
+    return safe.replace(re, '<mark class="bn-search-mark">$1</mark>');
+  }
+
+  // 应用搜索关键词：重算命中并重渲染列表
+  function applySearch(keyword) {
+    const s = window.BiliAiNote.state;
+    search.keyword = String(keyword || '').trim();
+    search.hits = [];
+    search.pos = -1;
+
+    if (search.keyword && s.subtitleBody?.length) {
+      const lower = search.keyword.toLowerCase();
+      s.subtitleBody.forEach((item, index) => {
+        if (String(item.content || '').toLowerCase().includes(lower)) {
+          search.hits.push(index);
+        }
+      });
+    }
+
+    renderSubtitleList();
+    updateSearchCountUI();
+
+    // 有命中时自动定位到第一个
+    if (search.hits.length) stepSearch(1);
+  }
+
+  // 在命中之间循环导航（dir: 1 下一个 / -1 上一个）
+  function stepSearch(dir) {
+    if (!search.hits.length) return;
+    search.pos = (search.pos + dir + search.hits.length) % search.hits.length;
+    const index = search.hits[search.pos];
+    updateSearchCountUI();
+    markSearchCurrent(index);
+    scrollToItem(index);
+  }
+
+  // 标记当前命中行
+  function markSearchCurrent(index) {
+    if (lastSearchCurrentEl) lastSearchCurrentEl.classList.remove('bn-search-current');
+    lastSearchCurrentEl = null;
+    const el = document.getElementById('bn-subtitle-list')?.querySelector(`[data-index="${index}"]`);
+    if (el) {
+      el.classList.add('bn-search-current');
+      lastSearchCurrentEl = el;
+    }
+  }
+
+  // 更新计数显示（当前第几个 / 总命中数）
+  function updateSearchCountUI() {
+    const countEl = document.getElementById('bn-search-count');
+    if (!countEl) return;
+    countEl.textContent = search.keyword
+      ? (search.hits.length ? `${search.pos + 1}/${search.hits.length}` : '0 结果')
+      : '';
+  }
+
+  // 数据变化（刷新/切换语言/换视频）时清空搜索状态
+  function clearSearchState() {
+    search.keyword = '';
+    search.hits = [];
+    search.pos = -1;
+    lastSearchCurrentEl = null;
+    const input = document.getElementById('bn-search-input');
+    if (input && input.value) input.value = '';
+    updateSearchCountUI();
+  }
+
   // ── 渲染字幕列表 ──
 
   let subtitleListenerAttached = false;
@@ -650,6 +740,9 @@
       return;
     }
 
+    // 搜索命中集合（用于行级 bn-search-hit / bn-search-dim）
+    const hitSet = new Set(search.hits);
+
     s.subtitleBody.forEach((item, index) => {
       const text = String(item.content || '').trim();
       if (!text) return;
@@ -657,14 +750,19 @@
       const screenshot = s.screenshots.get(index);
       const el = document.createElement('div');
 
+      const searchCls = search.keyword
+        ? (hitSet.has(index) ? ' bn-search-hit' : ' bn-search-dim')
+        : '';
+      const rowText = highlightText(text);
+
       if (screenshot) {
-        el.className = 'bn-row-img';
+        el.className = 'bn-row-img' + searchCls;
         el.dataset.index = index;
         el.innerHTML = `
           <img class="bn-snap-thumb" src="${screenshot.url}" alt="截图" data-index="${index}">
           <div class="bn-text-wrap">
             <div class="bn-time-text">${formatTime(item.from)}</div>
-            <div class="bn-sub-text">${escapeHtml(text)}</div>
+            <div class="bn-sub-text">${rowText}</div>
           </div>
           <div class="bn-btns">
             <button data-action="copy">复制</button>
@@ -672,11 +770,11 @@
           </div>
         `;
       } else {
-        el.className = 'bn-row';
+        el.className = 'bn-row' + searchCls;
         el.dataset.index = index;
         el.innerHTML = `
           <span class="bn-row-time">${formatTime(item.from)}</span>
-          <span class="bn-row-text">${escapeHtml(text)}</span>
+          <span class="bn-row-text">${rowText}</span>
           <div class="bn-btns">
             <button data-action="copy">复制</button>
             <button data-action="add-snap">截图</button>
@@ -696,6 +794,11 @@
     // 重新渲染后恢复高亮状态
     if (lastActiveIndex >= 0) {
       updateHighlight(lastActiveIndex);
+    }
+
+    // 重新渲染后恢复搜索当前命中标记
+    if (search.keyword && search.hits.length && search.pos >= 0) {
+      markSearchCurrent(search.hits[search.pos]);
     }
   }
 
@@ -780,6 +883,7 @@
     cachedSubtitleList = null;
     cachedRows = null;
     cachedActiveRow = null;
+    lastSearchCurrentEl = null;
   }
 
   // 性能优化：使用 requestAnimationFrame 节流 timeupdate
@@ -808,8 +912,8 @@
         lastActiveIndex = activeIndex;
       }
 
-      // 自动滚动：仅在开启且用户未手动滚动时生效
-      if (s.settings.autoScroll && activeIndex >= 0) {
+      // 自动滚动：仅在开启、非搜索态且用户未手动滚动时生效
+      if (s.settings.autoScroll && !search.keyword && activeIndex >= 0) {
         if (Date.now() > manualScrollPauseUntil) {
           scrollToItem(activeIndex);
         }
@@ -840,8 +944,8 @@
         lastActiveIndex = activeIndex;
       }
 
-      // seek 后也触发自动滚动
-      if (s.settings.autoScroll && activeIndex >= 0) {
+      // seek 后也触发自动滚动（搜索态除外）
+      if (s.settings.autoScroll && !search.keyword && activeIndex >= 0) {
         scrollToItem(activeIndex);
       }
     };
@@ -1130,6 +1234,9 @@
     stopTranscribe,
     parseTranscript,
     isTranscribedSubtitle,
-    clearTranscribedSubtitle
+    clearTranscribedSubtitle,
+    applySearch,
+    stepSearch,
+    clearSearchState
   };
 })();

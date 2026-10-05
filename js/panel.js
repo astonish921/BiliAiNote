@@ -87,7 +87,23 @@
       view.className = 'bn-view' + (def.id === 'subtitle' ? ' bn-show' : '');
       view.id = `bn-view-${def.id}`;
       if (def.id === 'subtitle') {
-        view.innerHTML = '<div id="bn-subtitle-list"></div>';
+        view.innerHTML = `
+          <div class="bn-search-bar" id="bn-search-bar">
+            <svg class="bn-search-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input type="text" id="bn-search-input" placeholder="搜索字幕，点击结果跳转播放位置" autocomplete="off" spellcheck="false">
+            <span class="bn-search-count" id="bn-search-count"></span>
+            <button class="bn-search-nav" id="bn-search-prev" title="上一个 (Shift+Enter)" aria-label="上一个">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>
+            </button>
+            <button class="bn-search-nav" id="bn-search-next" title="下一个 (Enter)" aria-label="下一个">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+            </button>
+            <button class="bn-search-nav" id="bn-search-clear" title="清空 (Esc)" aria-label="清空">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </div>
+          <div id="bn-subtitle-list"></div>
+        `;
       } else if (def.id === 'chapter') {
         view.innerHTML = '<div id="bn-chapter-list"></div>';
       } else if (def.id === 'video') {
@@ -194,6 +210,9 @@
     if (subFooter) {
       subFooter.addEventListener('click', onFooterClick);
     }
+
+    // 字幕搜索栏事件（输入防抖 + Enter/Esc 快捷键 + 上/下一个导航）
+    bindSearchBar();
 
     // 点击面板其他区域时关闭“更多”菜单
     panelEl.addEventListener('click', (e) => {
@@ -1500,6 +1519,43 @@
       clearBtn.disabled = !canClear;
       clearBtn.title = canClear ? '删除当前语音转写字幕及其存储记录' : 'B站字幕不能清空';
     }
+  }
+
+  // ── 字幕搜索栏 ──
+
+  function bindSearchBar() {
+    const input = panelEl?.querySelector('#bn-search-input');
+    const prevBtn = panelEl?.querySelector('#bn-search-prev');
+    const nextBtn = panelEl?.querySelector('#bn-search-next');
+    const clearBtn = panelEl?.querySelector('#bn-search-clear');
+    if (!input) return;
+
+    let debounceTimer = null;
+    input.addEventListener('input', () => {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        window.BiliAiNote.subtitle?.applySearch(input.value);
+      }, 300);
+    });
+
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        window.BiliAiNote.subtitle?.stepSearch(e.shiftKey ? -1 : 1);
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        input.value = '';
+        window.BiliAiNote.subtitle?.applySearch('');
+      }
+    });
+
+    prevBtn?.addEventListener('click', () => window.BiliAiNote.subtitle?.stepSearch(-1));
+    nextBtn?.addEventListener('click', () => window.BiliAiNote.subtitle?.stepSearch(1));
+    clearBtn?.addEventListener('click', () => {
+      input.value = '';
+      window.BiliAiNote.subtitle?.applySearch('');
+      input.focus();
+    });
   }
 
   async function onFooterClick(e) {

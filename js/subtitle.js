@@ -939,6 +939,22 @@
     const container = document.getElementById('bn-subtitle-list');
     if (!container) return;
 
+    // 无字幕时隐藏搜索区（含更多过滤），有字幕后恢复
+    const searchWrap = document.getElementById('bn-search-wrap');
+    if (searchWrap) {
+      searchWrap.style.display = (s.subtitleBody && s.subtitleBody.length) ? '' : 'none';
+    }
+
+    // 无字幕时隐藏底部「复制」「更多」按钮（保留语言切换与刷新）
+    const footer = document.querySelector('.bn-sub-footer');
+    if (footer) {
+      const hasSub = !!(s.subtitleBody && s.subtitleBody.length);
+      const copyBtn = footer.querySelector('[data-action="copy"]');
+      const moreBox = footer.querySelector('.bn-more-box');
+      if (copyBtn) copyBtn.style.display = hasSub ? '' : 'none';
+      if (moreBox) moreBox.style.display = hasSub ? '' : 'none';
+    }
+
     // 清除 DOM 缓存
     invalidateRowCache();
 

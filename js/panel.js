@@ -335,7 +335,7 @@
             <input type="text" id="bn-llm-form-name" class="bn-ai-input" placeholder="配置名称，如 我的 DeepSeek" autocomplete="off" spellcheck="false">
             <input type="text" id="bn-llm-form-base" class="bn-ai-input" placeholder="API 地址，如 http://127.0.0.1:8071/v1" autocomplete="off" spellcheck="false">
             <input type="text" id="bn-llm-form-key" class="bn-ai-input" placeholder="API Key" autocomplete="off" spellcheck="false">
-            <input type="text" id="bn-llm-form-model" class="bn-ai-input" placeholder="模型名称，如 deepseek-chat" autocomplete="off" spellcheck="false">
+            <input type="text" id="bn-llm-form-model" class="bn-ai-input" placeholder="模型ID，如 deepseek-chat" autocomplete="off" spellcheck="false">
             <div class="bn-llm-form-actions">
               <button class="bn-setting-btn" id="bn-llm-form-test">测试连接</button>
               <button class="bn-setting-btn bn-btn-primary" id="bn-llm-form-save">保存</button>
@@ -557,7 +557,7 @@
         s.llmActiveId = (s.llmActiveId === id) ? '' : id;
         window.BiliAiNote.settings.save();
         renderLlmConfigs();
-        showToast(s.llmActiveId ? `已启用：${config.model || config.name}` : '已禁用 LLM');
+        showToast(s.llmActiveId ? `已启用：${config.name || config.model}` : '已禁用 LLM');
       } else if (action === 'test') {
         btn.disabled = true;
         btn.textContent = '测试中…';
@@ -594,7 +594,7 @@
       const apiKey = panelEl.querySelector('#bn-llm-form-key').value.trim();
       const model = panelEl.querySelector('#bn-llm-form-model').value.trim();
       if (!apiBase) { showToast('请填写 API 地址'); return; }
-      if (!model) { showToast('请填写模型名称'); return; }
+      if (!model) { showToast('请填写模型ID'); return; }
 
       const s = window.BiliAiNote.state.settings;
       const configs = s.llmConfigs || [];
@@ -786,11 +786,11 @@
     function updateUI(docState) {
       if (!statusEl) return;
       const llm = activeLlm();
-      const fullModelName = llm ? String(llm.model || llm.name || '') : '';
-      const shortModelName = truncateModelName(fullModelName);
+      const fullDisplayName = llm ? String(llm.name || llm.model || '') : '';
+      const shortDisplayName = truncateModelName(fullDisplayName);
       const stateMap = {
         'no_llm':    { cls: 'bn-status-off',  dot: 'bn-dot-red',   text: '未启用',            action: '设置' },
-        'ready':     { cls: llm ? 'bn-status-ok' : 'bn-status-off', dot: llm ? 'bn-dot-green' : 'bn-dot-red', text: llm ? `已启用：${shortModelName}` : '未启用', action: llm ? '开始整理' : '设置' },
+        'ready':     { cls: llm ? 'bn-status-ok' : 'bn-status-off', dot: llm ? 'bn-dot-green' : 'bn-dot-red', text: llm ? `已启用：${shortDisplayName}` : '未启用', action: llm ? '开始整理' : '设置' },
         'generating': { cls: 'bn-status-warn', dot: 'bn-spinner',   text: '整理中',            action: '停止整理' },
         'done':      { cls: 'bn-status-ok',   dot: 'bn-dot-green', text: '已完成',            action: null },
         'error':     { cls: 'bn-status-off',  dot: 'bn-dot-red',   text: '错误',              action: llm ? '重试' : '设置' },
@@ -801,8 +801,8 @@
       const info = stateMap[state] || stateMap.no_llm;
       statusEl.className = `bn-status ${info.cls}`;
       statusEl.innerHTML = `<span class="${info.dot}"></span>${escapeHtml(info.text)}`;
-      // 仅启用状态展示完整模型名称；其他状态不保留旧 tooltip
-      statusEl.title = (state === 'ready' && fullModelName) ? `已启用：${fullModelName}` : '';
+      // 仅启用状态展示完整配置名称；其他状态不保留旧 tooltip
+      statusEl.title = (state === 'ready' && fullDisplayName) ? `已启用：${fullDisplayName}` : '';
 
       if (actionBtn) {
         if (info.action) {

@@ -73,7 +73,7 @@ git clone https://github.com/astonish921/BiliAiNote.git
 ### LLM 接口配置
 
 1. 进入「设置 → LLM 接口」，点击「＋ 添加 LLM」
-2. 填写配置名称、API 地址（需包含 `/v1`，如 `http://127.0.0.1:8071/v1`）、API Key、模型名称
+2. 填写配置名称、API 地址（需包含 `/v1`，如 `http://127.0.0.1:8071/v1`）、API Key、模型ID
 3. 点击「测试连接」验证可用后保存，启用该配置（同一时间仅一个生效）
 4. 支持多个配置随时切换，兼容所有 OpenAI 风格接口：DeepSeek 官方 API、Ollama、LM Studio、各类中转服务等
 

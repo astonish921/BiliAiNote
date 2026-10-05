@@ -88,19 +88,46 @@
       view.id = `bn-view-${def.id}`;
       if (def.id === 'subtitle') {
         view.innerHTML = `
-          <div class="bn-search-bar" id="bn-search-bar">
-            <svg class="bn-search-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-            <input type="text" id="bn-search-input" placeholder="搜索字幕，点击结果跳转播放位置" autocomplete="off" spellcheck="false">
-            <span class="bn-search-count" id="bn-search-count"></span>
-            <button class="bn-search-nav" id="bn-search-prev" title="上一个 (Shift+Enter)" aria-label="上一个">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>
-            </button>
-            <button class="bn-search-nav" id="bn-search-next" title="下一个 (Enter)" aria-label="下一个">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
-            </button>
-            <button class="bn-search-nav" id="bn-search-clear" title="清空 (Esc)" aria-label="清空">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-            </button>
+          <div class="bn-search-wrap" id="bn-search-wrap">
+            <div class="bn-search-bar" id="bn-search-bar">
+              <svg class="bn-search-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              <div class="bn-search-input-wrap">
+                <input type="text" id="bn-search-input" placeholder="搜索字幕" autocomplete="off" spellcheck="false">
+                <button class="bn-search-clear" id="bn-search-clear" title="清空" aria-label="清空" tabindex="-1">
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+              </div>
+              <div class="bn-search-actions">
+                <span class="bn-search-count" id="bn-search-count"></span>
+                <button class="bn-search-nav" id="bn-search-prev" title="上一个 (Shift+Enter)" aria-label="上一个">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>
+                </button>
+                <button class="bn-search-nav" id="bn-search-next" title="下一个 (Enter)" aria-label="下一个">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+                </button>
+                <button class="bn-search-nav" id="bn-search-restore" title="恢复默认：清空搜索与过滤" aria-label="恢复默认">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+                </button>
+                <button class="bn-search-nav bn-filter-toggle" id="bn-filter-toggle" title="展开更多过滤" aria-label="展开更多过滤" aria-expanded="false">
+                  <svg class="bn-filter-toggle-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="7 13 12 18 17 13"/><polyline points="7 6 12 11 17 6"/></svg>
+                </button>
+              </div>
+            </div>
+            <div class="bn-filter-area bn-hidden" id="bn-filter-area">
+              <div class="bn-note-search-row">
+                <svg class="bn-search-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                <div class="bn-search-input-wrap bn-note-search-wrap">
+                  <input type="text" id="bn-note-search-input" placeholder="搜索备注" autocomplete="off" spellcheck="false">
+                  <button class="bn-search-clear" id="bn-note-search-clear" title="清空" aria-label="清空" tabindex="-1">
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                  </button>
+                </div>
+              </div>
+              <div class="bn-filter-bar" id="bn-filter-bar">
+                <label class="bn-filter-item"><input type="checkbox" id="bn-filter-snap">只看截图</label>
+                <label class="bn-filter-item"><input type="checkbox" id="bn-filter-note">只看备注</label>
+              </div>
+            </div>
           </div>
           <div id="bn-subtitle-list"></div>
         `;
@@ -1525,37 +1552,82 @@
 
   function bindSearchBar() {
     const input = panelEl?.querySelector('#bn-search-input');
+    const noteInput = panelEl?.querySelector('#bn-note-search-input');
     const prevBtn = panelEl?.querySelector('#bn-search-prev');
     const nextBtn = panelEl?.querySelector('#bn-search-next');
-    const clearBtn = panelEl?.querySelector('#bn-search-clear');
+    const restoreBtn = panelEl?.querySelector('#bn-search-restore');
+    const filterArea = panelEl?.querySelector('#bn-filter-area');
     if (!input) return;
 
-    let debounceTimer = null;
-    input.addEventListener('input', () => {
-      clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => {
-        window.BiliAiNote.subtitle?.applySearch(input.value);
-      }, 300);
-    });
+    const subtitle = () => window.BiliAiNote.subtitle;
 
-    input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        window.BiliAiNote.subtitle?.stepSearch(e.shiftKey ? -1 : 1);
-      } else if (e.key === 'Escape') {
-        e.preventDefault();
-        input.value = '';
-        window.BiliAiNote.subtitle?.applySearch('');
-      }
-    });
-
-    prevBtn?.addEventListener('click', () => window.BiliAiNote.subtitle?.stepSearch(-1));
-    nextBtn?.addEventListener('click', () => window.BiliAiNote.subtitle?.stepSearch(1));
-    clearBtn?.addEventListener('click', () => {
+    // 恢复默认：清空关键词/备注搜索/过滤，并收起更多过滤区域
+    const filterToggle = panelEl?.querySelector('#bn-filter-toggle');
+    const setFilterOpen = (open) => {
+      filterArea?.classList.toggle('bn-hidden', !open);
+      if (!filterToggle) return;
+      filterToggle.classList.toggle('bn-open', open);
+      const label = open ? '收起更多过滤' : '展开更多过滤';
+      filterToggle.title = label;
+      filterToggle.setAttribute('aria-label', label);
+      filterToggle.setAttribute('aria-expanded', String(open));
+    };
+    const restoreSearch = () => {
       input.value = '';
-      window.BiliAiNote.subtitle?.applySearch('');
+      if (noteInput) noteInput.value = '';
+      subtitle()?.clearSearchState();
+      setFilterOpen(false);
+    };
+
+    // 输入即搜（无防抖）
+    input.addEventListener('input', () => subtitle()?.applySearch(input.value));
+    noteInput?.addEventListener('input', () => subtitle()?.applyNoteSearch(noteInput.value));
+
+    const bindKeydown = (el) => {
+      el.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          subtitle()?.stepSearch(e.shiftKey ? -1 : 1);
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          restoreSearch();
+        }
+      });
+    };
+    bindKeydown(input);
+    if (noteInput) bindKeydown(noteInput);
+
+    // 输入框内嵌清空按钮
+    panelEl?.querySelector('#bn-search-clear')?.addEventListener('click', () => {
+      input.value = '';
+      subtitle()?.applySearch('');
       input.focus();
     });
+    panelEl?.querySelector('#bn-note-search-clear')?.addEventListener('click', () => {
+      if (!noteInput) return;
+      noteInput.value = '';
+      subtitle()?.applyNoteSearch('');
+      noteInput.focus();
+    });
+
+    prevBtn?.addEventListener('click', () => subtitle()?.stepSearch(-1));
+    nextBtn?.addEventListener('click', () => subtitle()?.stepSearch(1));
+    restoreBtn?.addEventListener('click', restoreSearch);
+
+    // 展开/收起更多过滤区（点击切换）
+    filterToggle?.addEventListener('click', () => {
+      const open = filterArea ? !filterArea.classList.contains('bn-hidden') : false;
+      setFilterOpen(!open);
+    });
+
+    const snapBox = panelEl?.querySelector('#bn-filter-snap');
+    const noteBox = panelEl?.querySelector('#bn-filter-note');
+
+    const applyFilters = () => {
+      subtitle()?.setSearchFilters(snapBox?.checked, noteBox?.checked);
+    };
+    snapBox?.addEventListener('change', applyFilters);
+    noteBox?.addEventListener('change', applyFilters);
   }
 
   async function onFooterClick(e) {

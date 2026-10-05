@@ -108,6 +108,7 @@
       if (old?.url) URL.revokeObjectURL(old.url);
 
       s.screenshots.set(subtitleIndex, { blob, url, timeCode, timeSeconds });
+      persistScreenshots();
 
       // 重新渲染字幕列表
       window.BiliAiNote.subtitle.renderSubtitleList();
@@ -148,6 +149,7 @@
       const old = s.screenshots.get(key);
       if (old?.url) URL.revokeObjectURL(old.url);
       s.screenshots.set(key, { blob, url, timeCode: formatTimeCode(item.from), timeSeconds: item.from });
+      persistScreenshots();
 
       if (!wasPaused) video.play().catch(() => {});
       window.BiliAiNote.chapter.render();
@@ -167,6 +169,7 @@
     const old = s.screenshots.get(subtitleIndex);
     if (old?.url) URL.revokeObjectURL(old.url);
     s.screenshots.delete(subtitleIndex);
+    persistScreenshots();
     window.BiliAiNote.subtitle.renderSubtitleList();
     window.BiliAiNote.panel.renderDoc();
     window.BiliAiNote.panel.showToast('已取消截图');
@@ -202,6 +205,98 @@
     }
   }
 
+  /**
+   * 截图持久化（chrome.storage.local，base64 存储，按 bvid+分P 分组）
+   * 与行备注同一存储模式：刷新页面/重进视频自动恢复
+   */
+  const SNAPS_KEY = 'BiliAiNote_snapshots';
+  const SNAPS_MAX_VIDEOS = 30;
+
+  function snapsKey(bvid, pageIndex) {
+    return `${bvid}_p${pageIndex || 1}`;
+  }
+
+  function storageGet(keys) {
+    return new Promise(resolve => chrome.storage.local.get(keys, resolve));
+  }
+
+  function storageSet(items) {
+    return new Promise(resolve => chrome.storage.local.set(items, resolve));
+  }
+
+  function blobToDataUrl(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(reader.error || new Error('读取截图失败'));
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  async function dataUrlToBlob(dataUrl) {
+    const resp = await fetch(dataUrl);
+    return resp.blob();
+  }
+
+  // 恢复某视频分P的截图（含章节截图，负索引），生成新的 ObjectURL
+  async function loadScreenshots(bvid, pageIndex) {
+    const map = new Map();
+    try {
+      const result = await storageGet([SNAPS_KEY]);
+      const store = (result && result[SNAPS_KEY]) || {};
+      const shots = (store[snapsKey(bvid, pageIndex)] || {}).shots || {};
+      await Promise.all(Object.keys(shots).map(async k => {
+        const shot = shots[k];
+        if (!shot?.dataUrl) return;
+        const blob = await dataUrlToBlob(shot.dataUrl);
+        map.set(Number(k), {
+          blob,
+          url: URL.createObjectURL(blob),
+          timeCode: shot.timeCode || '',
+          timeSeconds: Number(shot.timeSeconds || 0)
+        });
+      }));
+    } catch (err) {
+      console.warn('[BiliAiNote] loadScreenshots failed:', err);
+    }
+    return map;
+  }
+
+  // 将当前内存中的截图写入存储（截图增删改后调用）
+  async function persistScreenshots() {
+    const s = window.BiliAiNote.state;
+    if (!s.bvid) return;
+    try {
+      const key = snapsKey(s.bvid, s.pageIndex || 1);
+      const result = await storageGet([SNAPS_KEY]);
+      const map = (result && result[SNAPS_KEY]) || {};
+
+      if (s.screenshots.size === 0) {
+        delete map[key];
+      } else {
+        const shots = {};
+        for (const [k, v] of s.screenshots) {
+          shots[k] = {
+            dataUrl: await blobToDataUrl(v.blob),
+            timeCode: v.timeCode || '',
+            timeSeconds: v.timeSeconds || 0
+          };
+        }
+        map[key] = { shots, at: Date.now() };
+      }
+
+      // 超出上限时淘汰最旧视频的记录
+      const keys = Object.keys(map);
+      if (keys.length > SNAPS_MAX_VIDEOS) {
+        keys.sort((a, b) => (map[a].at || 0) - (map[b].at || 0));
+        for (const k of keys.slice(0, keys.length - SNAPS_MAX_VIDEOS)) delete map[k];
+      }
+      await storageSet({ [SNAPS_KEY]: map });
+    } catch (err) {
+      console.warn('[BiliAiNote] persistScreenshots failed:', err);
+    }
+  }
+
   window.BiliAiNote.capture = {
     captureFrame,
     addScreenshot,
@@ -209,6 +304,8 @@
     removeScreenshot,
     saveToFile,
     copyToClipboard,
+    loadScreenshots,
+    persistScreenshots,
     formatTimeCode,
     formatTimeDisplay,
     generateDownloadFilename,

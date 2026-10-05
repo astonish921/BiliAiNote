@@ -355,6 +355,7 @@
       s.screenshots.set(currentSnapKey, {
         blob, url, timeCode: old?.timeCode || '0000', timeSeconds: old?.timeSeconds || 0
       });
+      window.BiliAiNote.capture?.persistScreenshots();
       currentBlob = blob;
       currentUrl = url;
       exitCropMode();
@@ -405,6 +406,7 @@
       timeCode: old?.timeCode || window.BiliAiNote.capture.formatTimeCode(video.currentTime),
       timeSeconds: video.currentTime
     });
+    window.BiliAiNote.capture?.persistScreenshots();
 
     // 刷新字幕/章节/截图目录缩略图
     if (window.BiliAiNote.subtitle?.renderSubtitleList) window.BiliAiNote.subtitle.renderSubtitleList();

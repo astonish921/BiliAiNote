@@ -104,6 +104,7 @@
         const old = s.screenshots.get(snapKey);
         if (old?.url) URL.revokeObjectURL(old.url);
         s.screenshots.delete(snapKey);
+        window.BiliAiNote.capture?.persistScreenshots();
         render();
         window.BiliAiNote.panel.showToast('已取消截图');
       }
@@ -157,6 +158,7 @@
         currentBlob = newBlob;
         imgEl.src = currentUrl;
         s.screenshots.set(snapKey, { blob: currentBlob, url: currentUrl });
+        window.BiliAiNote.capture?.persistScreenshots();
       } finally {
         frameActionBusy = false;
       }

@@ -26,6 +26,9 @@ window.BiliAiNote.state = {
   // 章节
   chapters: [],
 
+  // 行备注 Map<subtitleIndex, string>
+  notes: new Map(),
+
   // 截图 Map<subtitleIndex, {blob, url}>
   screenshots: new Map(),
 
@@ -74,6 +77,8 @@ window.BiliAiNote.state.reset = function () {
   s.selectedSubtitleId = '';
   s.subtitleBody = [];
   s.chapters = [];
+  // 行备注只清内存，存储中的持久化数据按 bvid+分P 保留
+  s.notes = new Map();
   // 递增 runId，取消所有进行中的请求
   s.fetchRunId++;
   // 释放截图 Blob URL

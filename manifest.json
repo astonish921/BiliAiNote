@@ -3,7 +3,7 @@
   "name": "BiliAiNote",
   "version": "1.0.1",
   "description": "B站视频字幕笔记工具 — 字幕识别+LLM总结+视频下载",
-  "permissions": ["storage", "activeTab", "scripting", "tabs"],
+  "permissions": ["storage", "unlimitedStorage", "activeTab", "scripting", "tabs"],
   "host_permissions": [
     "https://api.bilibili.com/*",
     "https://*.bilibili.com/*",

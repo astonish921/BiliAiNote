@@ -145,6 +145,19 @@
         return;
       }
 
+      // 加载该视频分P的行备注
+      s.notes = await loadNotes(s.bvid, s.pageIndex || 1);
+      if (runId !== s.fetchRunId) return; // 请求已过期
+
+      // 恢复该视频分P的截图（含章节截图，负索引），先释放旧的 ObjectURL
+      if (window.BiliAiNote.capture?.loadScreenshots) {
+        for (const [, v] of s.screenshots) {
+          if (v?.url) URL.revokeObjectURL(v.url);
+        }
+        s.screenshots = await window.BiliAiNote.capture.loadScreenshots(s.bvid, s.pageIndex || 1);
+        if (runId !== s.fetchRunId) return; // 请求已过期
+      }
+
       // 获取字幕列表和章节
       const bundle = await fetchSubtitleList(s.bvid, s.cid, s.aid);
       if (runId !== s.fetchRunId) return; // 请求已过期
@@ -629,49 +642,106 @@
     });
   } catch {}
 
-  // ── 字幕搜索 ──
+  // ── 字幕搜索与过滤 ──
 
   const search = {
     keyword: '',
-    hits: [],  // 命中的行索引（升序）
-    pos: -1    // 当前命中在 hits 中的下标
+    noteKeyword: '', // 备注关键词
+    onlySnap: false, // 只看截图
+    onlyNote: false, // 只看备注
+    hits: [],        // 命中的行索引（升序，关键词 ∧ 备注关键词 ∧ 过滤条件）
+    pos: -1          // 当前命中在 hits 中的下标
   };
 
   let lastSearchCurrentEl = null;
+
+  // 备注弹窗打开期间暂停自动滚动
+  let scrollPaused = false;
+
+  function isSearchActive() {
+    return !!(search.keyword || search.noteKeyword || search.onlySnap || search.onlyNote);
+  }
+
+  // 过滤条件：只看截图、只看备注同时勾选时取并集（满足任一即可）；
+  // 备注关键词与上述条件取交集
+  function rowMatchFilters(index, s) {
+    if (search.onlySnap || search.onlyNote) {
+      const snapOk = search.onlySnap && s.screenshots.has(index);
+      const noteOk = search.onlyNote && !!s.notes.get(index);
+      if (!snapOk && !noteOk) return false;
+    }
+    if (search.noteKeyword) {
+      const note = String(s.notes.get(index) || '').toLowerCase();
+      if (!note || !note.includes(search.noteKeyword)) return false;
+    }
+    return true;
+  }
 
   function escapeRegExp(str) {
     return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 
-  // 在已转义的文本中包裹 <mark>；关键词同样先做 HTML 转义，防止注入
-  function highlightText(text) {
-    const safe = escapeHtml(text);
-    if (!search.keyword) return safe;
-    const re = new RegExp(`(${escapeRegExp(escapeHtml(search.keyword))})`, 'gi');
-    return safe.replace(re, '<mark class="bn-search-mark">$1</mark>');
+  // 在已转义的文本中给关键词包裹 <mark>；关键词同样先做 HTML 转义，防止注入
+  function markKeyword(safeText, keyword) {
+    if (!keyword) return safeText;
+    const re = new RegExp(`(${escapeRegExp(escapeHtml(keyword))})`, 'gi');
+    return safeText.replace(re, '<mark class="bn-search-mark">$1</mark>');
   }
 
-  // 应用搜索关键词：重算命中并重渲染列表
-  function applySearch(keyword) {
+  function highlightText(text) {
+    return markKeyword(escapeHtml(text), search.keyword);
+  }
+
+  function highlightNoteText(note) {
+    return markKeyword(escapeHtml(note), search.noteKeyword);
+  }
+
+  // 重算命中并重渲染（keepPos: 数据变化时尽量保持当前命中位置）
+  function runSearch(options = {}) {
     const s = window.BiliAiNote.state;
-    search.keyword = String(keyword || '').trim();
+    const prevIndex = options.keepPos && search.pos >= 0 ? search.hits[search.pos] : -1;
+
     search.hits = [];
     search.pos = -1;
 
-    if (search.keyword && s.subtitleBody?.length) {
+    if (isSearchActive() && s.subtitleBody?.length) {
       const lower = search.keyword.toLowerCase();
       s.subtitleBody.forEach((item, index) => {
-        if (String(item.content || '').toLowerCase().includes(lower)) {
-          search.hits.push(index);
-        }
+        if (search.keyword && !String(item.content || '').toLowerCase().includes(lower)) return;
+        if (!rowMatchFilters(index, s)) return;
+        search.hits.push(index);
       });
+    }
+
+    if (prevIndex >= 0) {
+      const p = search.hits.indexOf(prevIndex);
+      if (p >= 0) search.pos = p;
     }
 
     renderSubtitleList();
     updateSearchCountUI();
+  }
 
-    // 有命中时自动定位到第一个
-    if (search.hits.length) stepSearch(1);
+  // 应用搜索关键词：重算命中并重渲染列表
+  function applySearch(keyword) {
+    search.keyword = String(keyword || '').trim();
+    runSearch();
+    if (search.hits.length && search.pos < 0) stepSearch(1);
+  }
+
+  // 应用过滤条件（与关键词叠加）
+  function setSearchFilters(onlySnap, onlyNote) {
+    search.onlySnap = !!onlySnap;
+    search.onlyNote = !!onlyNote;
+    runSearch();
+    if (search.hits.length && search.pos < 0) stepSearch(1);
+  }
+
+  // 应用备注关键词搜索（与字幕关键词、过滤条件叠加）
+  function applyNoteSearch(keyword) {
+    search.noteKeyword = String(keyword || '').trim().toLowerCase();
+    runSearch();
+    if (search.hits.length && search.pos < 0) stepSearch(1);
   }
 
   // 在命中之间循环导航（dir: 1 下一个 / -1 上一个）
@@ -699,20 +769,149 @@
   function updateSearchCountUI() {
     const countEl = document.getElementById('bn-search-count');
     if (!countEl) return;
-    countEl.textContent = search.keyword
+    countEl.textContent = isSearchActive()
       ? (search.hits.length ? `${search.pos + 1}/${search.hits.length}` : '0 结果')
       : '';
   }
 
-  // 数据变化（刷新/切换语言/换视频）时清空搜索状态
+  // 数据变化（刷新/切换语言/换视频）时清空搜索与过滤状态
   function clearSearchState() {
     search.keyword = '';
+    search.noteKeyword = '';
+    search.onlySnap = false;
+    search.onlyNote = false;
     search.hits = [];
     search.pos = -1;
     lastSearchCurrentEl = null;
     const input = document.getElementById('bn-search-input');
     if (input && input.value) input.value = '';
+    const noteInput = document.getElementById('bn-note-search-input');
+    if (noteInput && noteInput.value) noteInput.value = '';
+    ['bn-filter-snap', 'bn-filter-note'].forEach(id => {
+      const box = document.getElementById(id);
+      if (box) box.checked = false;
+    });
     updateSearchCountUI();
+    // 重渲染以移除高亮/变淡状态
+    renderSubtitleList();
+  }
+
+  // ── 行备注持久化（按 bvid+分P 分组存储） ──
+
+  const NOTES_KEY = 'BiliAiNote_notes';
+  const NOTES_MAX = 100;
+
+  function notesKey(bvid, pageIndex) {
+    return `${bvid}_p${pageIndex || 1}`;
+  }
+
+  function loadNotes(bvid, pageIndex) {
+    return new Promise(resolve => {
+      chrome.storage.local.get([NOTES_KEY], result => {
+        const map = (result && result[NOTES_KEY]) || {};
+        const entry = map[notesKey(bvid, pageIndex)] || {};
+        const notes = new Map();
+        Object.keys(entry.notes || {}).forEach(k => {
+          const text = String(entry.notes[k] || '').trim();
+          if (text) notes.set(Number(k), text);
+        });
+        resolve(notes);
+      });
+    });
+  }
+
+  function saveNotes(bvid, pageIndex, notes) {
+    return new Promise(resolve => {
+      chrome.storage.local.get([NOTES_KEY], result => {
+        const map = (result && result[NOTES_KEY]) || {};
+        const entry = {};
+        notes.forEach((text, index) => { entry[index] = text; });
+        if (Object.keys(entry).length) {
+          map[notesKey(bvid, pageIndex)] = { notes: entry, at: Date.now() };
+        } else {
+          delete map[notesKey(bvid, pageIndex)];
+        }
+        // 超出上限时淘汰最旧记录
+        const keys = Object.keys(map);
+        if (keys.length > NOTES_MAX) {
+          keys.sort((a, b) => (map[a].at || 0) - (map[b].at || 0));
+          for (const k of keys.slice(0, keys.length - NOTES_MAX)) delete map[k];
+        }
+        chrome.storage.local.set({ [NOTES_KEY]: map }, () => resolve());
+      });
+    });
+  }
+
+  // ── 行备注弹窗 ──
+
+  function openNoteModal(index) {
+    const s = window.BiliAiNote.state;
+    const item = s.subtitleBody[index];
+    if (!item) return;
+
+    scrollPaused = true;
+
+    const overlay = document.createElement('div');
+    overlay.className = 'bn-note-overlay';
+    overlay.innerHTML = `
+      <div class="bn-note-box">
+        <div class="bn-note-title">备注 · ${formatTime(item.from)}</div>
+        <textarea class="bn-note-textarea" placeholder="填写备注内容…" rows="4"></textarea>
+        <div class="bn-note-btns">
+          <button data-act="save">保存</button>
+          <button data-act="cancel">取消</button>
+        </div>
+      </div>
+    `;
+
+    const textarea = overlay.querySelector('.bn-note-textarea');
+    textarea.value = s.notes.get(index) || '';
+
+    const close = () => {
+      overlay.remove();
+      scrollPaused = false;
+      // 关闭后恢复自动滚动并滚回当前播放行
+      if (window.BiliAiNote.state.settings.autoScroll && lastActiveIndex >= 0) {
+        scrollToItem(lastActiveIndex);
+      }
+    };
+
+    overlay.addEventListener('click', (e) => {
+      const act = e.target.dataset?.act;
+      if (act === 'save') {
+        const text = textarea.value.trim();
+        if (text) s.notes.set(index, text);
+        else s.notes.delete(index);
+        saveNotes(s.bvid, s.pageIndex || 1, s.notes).catch(() => {});
+        runSearch({ keepPos: true });
+        window.BiliAiNote.panel.showToast(text ? '备注已保存' : '备注已清空');
+        close();
+      } else if (act === 'cancel' || e.target === overlay) {
+        close();
+      }
+    });
+
+    textarea.addEventListener('keydown', (e) => {
+      e.stopPropagation();
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        close();
+      } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        overlay.querySelector('[data-act="save"]').click();
+      }
+    });
+
+    document.body.appendChild(overlay);
+    textarea.focus();
+  }
+
+  function deleteNote(index) {
+    const s = window.BiliAiNote.state;
+    s.notes.delete(index);
+    saveNotes(s.bvid, s.pageIndex || 1, s.notes).catch(() => {});
+    runSearch({ keepPos: true });
+    window.BiliAiNote.panel.showToast('已删除备注');
   }
 
   // ── 渲染字幕列表 ──
@@ -741,6 +940,7 @@
     }
 
     // 搜索命中集合（用于行级 bn-search-hit / bn-search-dim）
+    const filtering = isSearchActive();
     const hitSet = new Set(search.hits);
 
     s.subtitleBody.forEach((item, index) => {
@@ -748,12 +948,16 @@
       if (!text) return;
 
       const screenshot = s.screenshots.get(index);
+      const note = s.notes.get(index);
       const el = document.createElement('div');
 
-      const searchCls = search.keyword
+      const searchCls = filtering
         ? (hitSet.has(index) ? ' bn-search-hit' : ' bn-search-dim')
         : '';
       const rowText = highlightText(text);
+      const noteHtml = note
+        ? `<span class="bn-row-note">备注：${highlightNoteText(note)}</span>`
+        : '';
 
       if (screenshot) {
         el.className = 'bn-row-img' + searchCls;
@@ -763,9 +967,12 @@
           <div class="bn-text-wrap">
             <div class="bn-time-text">${formatTime(item.from)}</div>
             <div class="bn-sub-text">${rowText}</div>
+            ${noteHtml}
           </div>
           <div class="bn-btns">
             <button data-action="copy">复制</button>
+            <button data-action="note">备注</button>
+            ${note ? '<button data-action="delete-note">删除备注</button>' : ''}
             <button data-action="cancel-snap">取消截图</button>
           </div>
         `;
@@ -774,9 +981,11 @@
         el.dataset.index = index;
         el.innerHTML = `
           <span class="bn-row-time">${formatTime(item.from)}</span>
-          <span class="bn-row-text">${rowText}</span>
+          <span class="bn-row-text">${rowText}${noteHtml}</span>
           <div class="bn-btns">
             <button data-action="copy">复制</button>
+            <button data-action="note">备注</button>
+            ${note ? '<button data-action="delete-note">删除备注</button>' : ''}
             <button data-action="add-snap">截图</button>
           </div>
         `;
@@ -835,6 +1044,10 @@
 
     if (action === 'copy') {
       copySingleText(index);
+    } else if (action === 'note') {
+      openNoteModal(index);
+    } else if (action === 'delete-note') {
+      deleteNote(index);
     } else if (action === 'add-snap') {
       if (window.BiliAiNote.capture) {
         window.BiliAiNote.capture.addScreenshot(index);
@@ -912,8 +1125,8 @@
         lastActiveIndex = activeIndex;
       }
 
-      // 自动滚动：仅在开启、非搜索态且用户未手动滚动时生效
-      if (s.settings.autoScroll && !search.keyword && activeIndex >= 0) {
+      // 自动滚动：仅在开启、非搜索/过滤态、无弹窗且用户未手动滚动时生效
+      if (s.settings.autoScroll && !isSearchActive() && !scrollPaused && activeIndex >= 0) {
         if (Date.now() > manualScrollPauseUntil) {
           scrollToItem(activeIndex);
         }
@@ -944,8 +1157,8 @@
         lastActiveIndex = activeIndex;
       }
 
-      // seek 后也触发自动滚动（搜索态除外）
-      if (s.settings.autoScroll && !search.keyword && activeIndex >= 0) {
+      // seek 后也触发自动滚动（搜索/过滤态、弹窗打开时除外）
+      if (s.settings.autoScroll && !isSearchActive() && !scrollPaused && activeIndex >= 0) {
         scrollToItem(activeIndex);
       }
     };
@@ -1170,6 +1383,7 @@
         currentBlob = newBlob;
         imgEl.src = currentUrl;
         s.screenshots.set(index, { blob: currentBlob, url: currentUrl });
+        window.BiliAiNote.capture?.persistScreenshots();
       } finally {
         frameActionBusy = false;
       }
@@ -1236,6 +1450,8 @@
     isTranscribedSubtitle,
     clearTranscribedSubtitle,
     applySearch,
+    applyNoteSearch,
+    setSearchFilters,
     stepSearch,
     clearSearchState
   };

@@ -390,18 +390,20 @@
   word-break: break-all;
 }
 
-/* 字幕搜索栏 */
+/* 字幕搜索栏（外层容器 sticky，包含搜索行与过滤行） */
+.bn-search-wrap {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--bn-footer-bg);
+  border-bottom: 1px solid var(--bn-border);
+}
+
 .bn-search-bar {
   display: flex;
   align-items: center;
   gap: 4px;
   padding: 6px 8px;
-  background: var(--bn-footer-bg);
-  border-bottom: 1px solid var(--bn-border);
-  /* 悬浮在滚动区顶部，不随字幕列表滚走 */
-  position: sticky;
-  top: 0;
-  z-index: 5;
 }
 
 .bn-search-icon {
@@ -409,20 +411,57 @@
   color: var(--bn-text-sub);
 }
 
-.bn-search-bar input {
+/* 输入框容器：内嵌清空按钮 */
+.bn-search-input-wrap {
+  position: relative;
+  display: flex;
+  flex: 0 1 150px;
+  min-width: 90px;
+}
+
+.bn-search-input-wrap input {
   flex: 1;
   min-width: 0;
+  width: 100%;
   border: 1px solid var(--bn-btn-border);
   border-radius: 4px;
   background: var(--bn-btn-bg);
   color: var(--bn-text);
   font-size: var(--bn-font-size);
-  padding: 3px 6px;
+  padding: 3px 20px 3px 6px;
   outline: none;
 }
 
-.bn-search-bar input:focus {
+.bn-search-input-wrap input:focus {
   border-color: var(--bn-accent);
+}
+
+/* 输入框内嵌 X：仅有内容时显示 */
+.bn-search-clear {
+  position: absolute;
+  right: 3px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--bn-text-sub);
+  cursor: pointer;
+}
+
+.bn-search-input-wrap input:not(:placeholder-shown) ~ .bn-search-clear {
+  display: flex;
+}
+
+.bn-search-clear:hover {
+  background: var(--bn-hover);
+  color: var(--bn-text);
 }
 
 .bn-search-count {
@@ -430,6 +469,15 @@
   color: var(--bn-text-sub);
   font-size: 0.92em;
   white-space: nowrap;
+}
+
+/* 右对齐动作组：上一个/下一个/恢复/⋮ */
+.bn-search-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
 }
 
 .bn-search-nav {
@@ -452,6 +500,54 @@
   color: var(--bn-text);
 }
 
+/* 更多过滤展开/收起按钮：双箭头图标，展开时旋转 180°
+   （与面板右上角的单箭头收起、四角放大图标区分） */
+.bn-filter-toggle .bn-filter-toggle-icon {
+  transition: transform 0.15s;
+}
+
+.bn-filter-toggle.bn-open .bn-filter-toggle-icon {
+  transform: rotate(180deg);
+}
+
+/* 更多过滤展开区：备注搜索框 + 勾选项（随搜索区一起 sticky） */
+.bn-filter-area {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 8px 6px;
+}
+
+.bn-filter-area.bn-hidden {
+  display: none;
+}
+
+.bn-note-search-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.bn-filter-bar {
+  display: flex;
+  gap: 14px;
+}
+
+.bn-filter-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--bn-text);
+  font-size: var(--bn-font-size);
+  cursor: pointer;
+  user-select: none;
+}
+
+.bn-filter-item input {
+  margin: 0;
+  cursor: pointer;
+}
+
 /* 搜索态的行 */
 .bn-row.bn-search-dim,
 .bn-row-img.bn-search-dim {
@@ -469,6 +565,86 @@
   color: #333;
   border-radius: 2px;
   padding: 0 1px;
+}
+
+/* 行备注：字幕文字下方小字号次要色显示 */
+.bn-row-note {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.88em;
+  color: var(--bn-text-sub);
+  word-break: break-all;
+}
+
+/* 行备注弹窗 */
+.bn-note-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100000;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.bn-note-box {
+  width: min(360px, calc(100vw - 48px));
+  padding: 14px;
+  border: 1px solid var(--bn-border);
+  border-radius: 8px;
+  background: var(--bn-card);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.bn-note-title {
+  font-size: 1.05em;
+  color: var(--bn-text);
+}
+
+.bn-note-textarea {
+  width: 100%;
+  min-height: 96px;
+  resize: vertical;
+  border: 1px solid var(--bn-btn-border);
+  border-radius: 6px;
+  background: var(--bn-btn-bg);
+  color: var(--bn-text);
+  font-size: var(--bn-font-size);
+  line-height: var(--bn-line-height);
+  padding: 8px;
+  outline: none;
+}
+
+.bn-note-textarea:focus {
+  border-color: var(--bn-accent);
+}
+
+.bn-note-btns {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.bn-note-btns button {
+  padding: 4px 14px;
+  border: 1px solid var(--bn-btn-border);
+  border-radius: 6px;
+  background: var(--bn-btn-bg);
+  color: var(--bn-text);
+  font-size: var(--bn-font-size);
+  cursor: pointer;
+}
+
+.bn-note-btns button[data-act="save"] {
+  background: var(--bn-accent);
+  border-color: var(--bn-accent);
+  color: #fff;
+}
+
+.bn-note-btns button:hover {
+  opacity: 0.9;
 }
 
 

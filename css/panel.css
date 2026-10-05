@@ -576,7 +576,13 @@
   word-break: break-all;
 }
 
-/* 行备注弹窗 */
+/* 行备注弹窗（挂载在 body 下，不受面板 box-sizing 影响，需单独声明） */
+.bn-note-overlay,
+.bn-note-box,
+.bn-note-textarea {
+  box-sizing: border-box;
+}
+
 .bn-note-overlay {
   position: fixed;
   inset: 0;

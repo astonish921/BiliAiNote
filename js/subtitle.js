@@ -352,6 +352,11 @@
     error: '',
     requestId: null,
     transcript: null, // 服务端返回的结构化字幕 [{start, end, text}]（毫秒）
+    stage: '',
+    statusText: '正在准备视频',
+    percent: null,
+    stageStartedAt: 0,
+    timer: null
   };
 
   function checkTranscribeClient() {
@@ -374,21 +379,52 @@
     }
   }
 
-  // 空态/转写态渲染：无法获取字幕 + 语音转写按钮（或流式内容）
+  function formatElapsed(ms) {
+    const total = Math.max(0, Math.floor(ms / 1000));
+    const m = Math.floor(total / 60);
+    const s = total % 60;
+    return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  }
+
+  function transcribeDisplayText() {
+    let text = transcribe.statusText || '正在语音转写';
+    if (Number.isFinite(transcribe.percent)) text += ` ${transcribe.percent}%`;
+    if (transcribe.stage === 'recognizing' && transcribe.stageStartedAt) {
+      const elapsed = Date.now() - transcribe.stageStartedAt;
+      if (elapsed >= 5 * 60 * 1000) text = '识别仍在进行，可继续等待或停止';
+      else if (elapsed >= 2 * 60 * 1000) text = '音频较长，仍在识别字幕';
+      text += `，已等待 ${formatElapsed(elapsed)}`;
+    }
+    return text;
+  }
+
+  function stopTranscribeTimer() {
+    if (transcribe.timer) {
+      clearInterval(transcribe.timer);
+      transcribe.timer = null;
+    }
+  }
+
+  function startTranscribeTimer() {
+    stopTranscribeTimer();
+    transcribe.timer = setInterval(() => {
+      if (transcribe.state !== 'running' || transcribe.stage !== 'recognizing') return;
+      const el = document.querySelector('#bn-subtitle-list .bn-transcribe-status');
+      if (el) el.textContent = transcribeDisplayText();
+    }, 1000);
+  }
+
+  // 空态/转写态渲染：无法获取字幕 + 语音转写按钮（或当前阶段）
   function renderTranscribeState(container) {
     if (transcribe.state === 'running') {
-      const preview = escapeHtml(transcribe.text).slice(-3000);
       container.innerHTML = `
         <div class="bn-transcribe-box">
           <div class="bn-transcribe-head">
-            <span class="bn-transcribe-status">正在语音转写…</span>
+            <span class="bn-transcribe-status">${escapeHtml(transcribeDisplayText())}</span>
             <button class="bn-transcribe-stop" data-action="stop-transcribe">停止</button>
           </div>
-          <pre class="bn-transcribe-stream">${preview}</pre>
         </div>
       `;
-      const streamEl = container.querySelector('.bn-transcribe-stream');
-      if (streamEl) streamEl.scrollTop = streamEl.scrollHeight;
       return;
     }
 
@@ -451,6 +487,11 @@
     transcribe.error = '';
     transcribe.requestId = null;
     transcribe.transcript = null;
+    transcribe.stage = 'preparing';
+    transcribe.statusText = '正在准备视频';
+    transcribe.percent = null;
+    transcribe.stageStartedAt = Date.now();
+    startTranscribeTimer();
 
     const container = document.getElementById('bn-subtitle-list');
     if (container) renderTranscribeState(container);
@@ -469,12 +510,14 @@
         { type: 'transcribe-start', videoUrl: buildVideoUrl(), audioPath },
         (resp) => {
           if (chrome.runtime.lastError) {
+            stopTranscribeTimer();
             transcribe.error = chrome.runtime.lastError.message || '通信失败';
             transcribe.state = 'error';
             renderTranscribeState(document.getElementById('bn-subtitle-list') || container);
             return;
           }
           if (!resp || !resp.ok) {
+            stopTranscribeTimer();
             transcribe.error = resp?.error || '请求失败';
             transcribe.state = 'error';
             renderTranscribeState(document.getElementById('bn-subtitle-list') || container);
@@ -485,6 +528,7 @@
       );
     } catch (e) {
       // Extension context invalidated
+      stopTranscribeTimer();
       transcribe.error = '扩展已重新加载，请刷新本页面后重试';
       transcribe.state = 'error';
       const c = document.getElementById('bn-subtitle-list');
@@ -497,9 +541,11 @@
     try {
       chrome.runtime.sendMessage({ type: 'transcribe-abort' });
     } catch {}
+    stopTranscribeTimer();
     transcribe.state = 'idle';
     transcribe.text = '';
     transcribe.transcript = null;
+    transcribe.stage = '';
     const container = document.getElementById('bn-subtitle-list');
     if (container) renderTranscribeState(container);
   }
@@ -600,9 +646,11 @@
       return;
     }
 
+    stopTranscribeTimer();
     transcribe.state = 'idle';
     transcribe.text = '';
     transcribe.transcript = null;
+    transcribe.stage = '';
     s.subtitleBody = items;
     // 持久化：刷新页面/下次进入时可直接恢复，无需重新转写
     saveTranscript(s.bvid, s.pageIndex || 1, items).catch(() => {});
@@ -624,9 +672,21 @@
       if (transcribe.requestId && msg.requestId && transcribe.requestId !== msg.requestId) return;
 
       switch (msg.type) {
-        case 'transcribe-chunk':
-          transcribe.text += msg.text || '';
+        case 'transcribe-status': {
+          const nextStage = msg.stage || '';
+          if (nextStage !== transcribe.stage) {
+            transcribe.stage = nextStage;
+            transcribe.stageStartedAt = Date.now();
+          }
+          transcribe.statusText = msg.text || transcribe.statusText;
+          transcribe.percent = Number.isFinite(msg.percent) ? msg.percent : null;
+          if (transcribe.stage === 'recognizing') startTranscribeTimer();
           renderTranscribeState(document.getElementById('bn-subtitle-list'));
+          break;
+        }
+        case 'transcribe-chunk':
+          // 兼容旧客户端：仅累积用于回退解析，不再显示详细日志
+          transcribe.text += msg.text || '';
           break;
         case 'transcribe-result':
           if (Array.isArray(msg.transcript)) {
@@ -642,15 +702,19 @@
           finishTranscribe();
           break;
         case 'transcribe-aborted':
+          stopTranscribeTimer();
           transcribe.state = 'idle';
           transcribe.text = '';
           transcribe.transcript = null;
+          transcribe.stage = '';
           renderTranscribeState(document.getElementById('bn-subtitle-list'));
           window.BiliAiNote.panel.showToast('已停止转写');
           break;
         case 'transcribe-error':
+          stopTranscribeTimer();
           transcribe.error = msg.error || '转写失败';
           transcribe.state = 'error';
+          transcribe.stage = '';
           renderTranscribeState(document.getElementById('bn-subtitle-list'));
           window.BiliAiNote.panel.showToast('转写失败：' + transcribe.error);
           break;

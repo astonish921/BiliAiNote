@@ -905,7 +905,14 @@ async function transcribeHandleStart(requestId, videoUrl, audioPath, senderTabId
       const parsed = transcribeParseStreamChunk(chunk, sseBuf);
       sseBuf = parsed.remainder;
 
-      if (parsed.logs) send({ type: 'transcribe-chunk', text: parsed.logs });
+      if (parsed.status) {
+        send({
+          type: 'transcribe-status',
+          stage: parsed.status.stage || '',
+          text: parsed.status.text || '',
+          percent: Number.isFinite(parsed.status.percent) ? parsed.status.percent : null
+        });
+      }
       if (parsed.result) {
         send({
           type: 'transcribe-result',
@@ -918,7 +925,14 @@ async function transcribeHandleStart(requestId, videoUrl, audioPath, senderTabId
 
     if (sseBuf.trim()) {
       const tail = transcribeParseStreamChunk('\n', sseBuf);
-      if (tail.logs) send({ type: 'transcribe-chunk', text: tail.logs });
+      if (tail.status) {
+        send({
+          type: 'transcribe-status',
+          stage: tail.status.stage || '',
+          text: tail.status.text || '',
+          percent: Number.isFinite(tail.status.percent) ? tail.status.percent : null
+        });
+      }
       if (tail.result) {
         send({
           type: 'transcribe-result',
@@ -942,13 +956,15 @@ async function transcribeHandleStart(requestId, videoUrl, audioPath, senderTabId
 }
 
 // 解析转写服务的 SSE 流：
-// - {"message":"...","type":"log"}     → 日志文本（流式显示）
+// - {"type":"status","stage":"...","text":"...","percent":N} → UI 当前阶段
+// - {"message":"...","type":"log"}     → 详细日志（仅诊断，不在 UI 展示）
 // - {...,"transcript":[...],"type":"result"} → 结构化字幕（一次性下发）
 // - ":"/{"type":"done"}                → 心跳/结束，忽略
 // 非 SSE 纯文本响应则原样透传
 function transcribeParseStreamChunk(chunk, prevBuf) {
   const buf = prevBuf + chunk;
   let logs = '';
+  let status = null;
   let result = null;
   let remainder = '';
 
@@ -969,7 +985,10 @@ function transcribeParseStreamChunk(chunk, prevBuf) {
         const obj = JSON.parse(payload);
         if (obj.type === 'result' && Array.isArray(obj.transcript)) {
           result = obj;
+        } else if (obj.type === 'status' && typeof obj.text === 'string') {
+          status = obj;
         } else if (typeof obj.message === 'string' && obj.message) {
+          // 详细日志仅保留解析兼容性，不再转发到字幕 UI
           logs += obj.message + '\n';
         }
       } catch {
@@ -980,6 +999,6 @@ function transcribeParseStreamChunk(chunk, prevBuf) {
     logs = buf;
   }
 
-  return { logs, result, remainder };
+  return { logs, status, result, remainder };
 }
 

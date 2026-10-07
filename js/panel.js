@@ -526,6 +526,10 @@
   // 当前正在编辑的配置 id（null = 新增）
   let llmEditingId = null;
 
+  // 配置列表连接测试状态（仅当前页面会话保留）
+  // id -> { state: 'testing' | 'success' | 'error', text, detail }
+  const llmTestStates = new Map();
+
   function renderLlmConfigs() {
     const listEl = panelEl?.querySelector('#bn-llm-list');
     if (!listEl) return;
@@ -539,16 +543,21 @@
 
     listEl.innerHTML = configs.map(c => {
       const active = c.id === s.llmActiveId;
+      const testState = llmTestStates.get(c.id);
+      const testStatus = testState
+        ? `<span class="bn-llm-test-status ${escapeHtml(testState.state)}" title="${escapeHtml(testState.detail || testState.text)}">${escapeHtml(testState.text)}</span>`
+        : '';
       return `
         <div class="bn-llm-item${active ? ' active' : ''}" data-id="${escapeHtml(c.id)}">
           <div class="bn-llm-item-info">
             <span class="bn-llm-item-name">${escapeHtml(c.name || '未命名')}</span>
             <span class="bn-llm-item-model">${escapeHtml(c.model || '')}</span>
             ${active ? '<span class="bn-llm-item-badge">已启用</span>' : ''}
+            ${testStatus}
           </div>
           <div class="bn-llm-item-actions">
             <button data-action="toggle" title="${active ? '禁用' : '启用'}">${active ? '禁用' : '启用'}</button>
-            <button data-action="test" title="测试连接">测试</button>
+            <button data-action="test" title="测试连接"${testState?.state === 'testing' ? ' disabled' : ''}>${testState?.state === 'testing' ? '测试中…' : '测试'}</button>
             <button data-action="edit" title="编辑">编辑</button>
             <button data-action="delete" title="删除">删除</button>
           </div>
@@ -605,23 +614,31 @@
         renderLlmConfigs();
         showToast(s.llmActiveId ? `已启用：${config.name || config.model}` : '已禁用 LLM');
       } else if (action === 'test') {
-        btn.disabled = true;
-        btn.textContent = '测试中…';
+        llmTestStates.set(id, { state: 'testing', text: '正在测试…', detail: '' });
+        renderLlmConfigs();
+        let settled = false;
+        const finish = (resp) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(watchdog);
+          const runtimeError = chrome.runtime.lastError?.message;
+          if (resp && resp.ok) {
+            llmTestStates.set(id, { state: 'success', text: '连接成功', detail: '连接成功' });
+          } else {
+            const error = runtimeError || (resp && resp.error) || '未知错误';
+            llmTestStates.set(id, { state: 'error', text: '连接失败', detail: error });
+          }
+          renderLlmConfigs();
+        };
+        const watchdog = setTimeout(() => finish({ ok: false, error: '测试超时' }), 30000);
         chrome.runtime.sendMessage(
           { type: 'llm-test', apiBase: config.apiBase, apiKey: config.apiKey, model: config.model },
-          (resp) => {
-            btn.disabled = false;
-            btn.textContent = '测试';
-            if (resp && resp.ok) {
-              showToast('连接成功');
-            } else {
-              showToast('连接失败：' + ((resp && resp.error) || '未知错误'));
-            }
-          }
+          finish
         );
       } else if (action === 'edit') {
         llmOpenForm(config);
       } else if (action === 'delete') {
+        llmTestStates.delete(id);
         s.llmConfigs = configs.filter(c => c.id !== id);
         if (s.llmActiveId === id) s.llmActiveId = '';
         window.BiliAiNote.settings.save();
@@ -670,17 +687,24 @@
       if (!apiBase) { showToast('请填写 API 地址'); return; }
       testBtn.disabled = true;
       testBtn.textContent = '测试中…';
+      let settled = false;
+      const finish = (resp) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(watchdog);
+        testBtn.disabled = false;
+        testBtn.textContent = '测试连接';
+        const runtimeError = chrome.runtime.lastError?.message;
+        if (resp && resp.ok) {
+          showToast('连接成功');
+        } else {
+          showToast('连接失败：' + (runtimeError || (resp && resp.error) || '未知错误'));
+        }
+      };
+      const watchdog = setTimeout(() => finish({ ok: false, error: '测试超时' }), 30000);
       chrome.runtime.sendMessage(
         { type: 'llm-test', apiBase, apiKey, model },
-        (resp) => {
-          testBtn.disabled = false;
-          testBtn.textContent = '测试连接';
-          if (resp && resp.ok) {
-            showToast('连接成功');
-          } else {
-            showToast('连接失败：' + ((resp && resp.error) || '未知错误'));
-          }
-        }
+        finish
       );
     });
 

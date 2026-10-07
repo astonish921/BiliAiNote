@@ -1151,6 +1151,26 @@
   flex-shrink: 0;
 }
 
+/* LLM 测试结果显示在配置首行右侧 */
+.bn-llm-test-status {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 0.82em;
+  white-space: nowrap;
+}
+
+.bn-llm-test-status.testing {
+  color: var(--bn-text-sub);
+}
+
+.bn-llm-test-status.success {
+  color: #2d8a2d;
+}
+
+.bn-llm-test-status.error {
+  color: #d93025;
+}
+
 .bn-llm-item-actions {
   display: flex;
   gap: 6px;

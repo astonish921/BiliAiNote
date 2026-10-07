@@ -107,7 +107,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === 'llm-test') {
     llmTestConnection(message.apiBase, message.apiKey, message.model)
-      .then(result => sendResponse(result));
+      .then(result => sendResponse(result))
+      .catch(err => sendResponse({ ok: false, error: err?.message || String(err) }));
     return true;
   }
 
@@ -568,35 +569,42 @@ async function llmTestConnection(apiBase, apiKey, model) {
     ...(apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {})
   };
 
-  // 1) GET /models
-  try {
+  // 1) GET /models。计时器覆盖整个响应体读取，不能在只收到响应头时提前清除。
+  {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 10000);
-    const resp = await fetch(`${base}/models`, { headers, signal: ctrl.signal });
-    clearTimeout(timer);
-    if (resp.ok) {
-      let modelOk = !model;
-      try {
-        const data = await resp.json();
-        const ids = (data.data || data.models || []).map(m => m.id || m.name || '');
-        if (model && ids.length) modelOk = ids.includes(model);
-      } catch {}
-      return { ok: true, method: 'models', modelOk };
+    try {
+      const resp = await fetch(`${base}/models`, { headers, signal: ctrl.signal });
+      if (resp.ok) {
+        let modelOk = !model;
+        try {
+          const data = await resp.json();
+          const ids = (data.data || data.models || []).map(m => m.id || m.name || '');
+          if (model && ids.length) modelOk = ids.includes(model);
+        } catch (err) {
+          if (err.name === 'AbortError') throw err;
+        }
+        return { ok: true, method: 'models', modelOk };
+      }
+      // 404/405：该服务未实现模型列表，降级 chat
+      if (resp.status !== 404 && resp.status !== 405) {
+        let detail = '';
+        try { detail = (await resp.text()).slice(0, 200); } catch (err) {
+          if (err.name === 'AbortError') throw err;
+        }
+        return { ok: false, error: `HTTP ${resp.status} ${resp.statusText}${detail ? ' - ' + detail : ''}` };
+      }
+    } catch (err) {
+      // models 超时或网络失败时继续尝试 chat
+    } finally {
+      clearTimeout(timer);
     }
-    // 404/405：该服务未实现模型列表，降级 chat
-    if (resp.status !== 404 && resp.status !== 405) {
-      let detail = '';
-      try { detail = (await resp.text()).slice(0, 200); } catch {}
-      return { ok: false, error: `HTTP ${resp.status} ${resp.statusText}${detail ? ' - ' + detail : ''}` };
-    }
-  } catch (err) {
-    // 网络层失败（含超时）：继续尝试 chat，仍失败则报网络错误
   }
 
-  // 2) 最小 chat 请求
+  // 2) 最小 chat 请求。超时覆盖 fetch + 响应体读取。
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 15000);
   try {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 15000);
     const resp = await fetch(`${base}/chat/completions`, {
       method: 'POST',
       headers,
@@ -608,13 +616,20 @@ async function llmTestConnection(apiBase, apiKey, model) {
       }),
       signal: ctrl.signal
     });
-    clearTimeout(timer);
-    if (resp.ok) return { ok: true, method: 'chat' };
+    if (resp.ok) {
+      // 主动取消/释放可能持续输出的响应体，不等待无用内容。
+      try { await resp.body?.cancel(); } catch {}
+      return { ok: true, method: 'chat' };
+    }
     let detail = '';
-    try { detail = (await resp.text()).slice(0, 200); } catch {}
+    try { detail = (await resp.text()).slice(0, 200); } catch (err) {
+      if (err.name === 'AbortError') throw err;
+    }
     return { ok: false, error: `HTTP ${resp.status} ${resp.statusText}${detail ? ' - ' + detail : ''}` };
   } catch (err) {
     return { ok: false, error: err.name === 'AbortError' ? '连接超时' : (err.message || String(err)) };
+  } finally {
+    clearTimeout(timer);
   }
 }
 

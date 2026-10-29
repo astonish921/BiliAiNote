@@ -382,6 +382,11 @@
             <input type="text" id="bn-llm-form-base" class="bn-ai-input" placeholder="API 地址，如 http://127.0.0.1:8071/v1" autocomplete="off" spellcheck="false">
             <input type="text" id="bn-llm-form-key" class="bn-ai-input" placeholder="API Key" autocomplete="off" spellcheck="false">
             <input type="text" id="bn-llm-form-model" class="bn-ai-input" placeholder="模型ID，如 deepseek-chat" autocomplete="off" spellcheck="false">
+            <div class="bn-switch bn-llm-form-thinking">
+              <span>开启思考（深度推理，输出更慢更详尽）</span>
+              <input type="checkbox" id="bn-llm-form-thinking">
+              <label class="bn-switch-track" for="bn-llm-form-thinking"></label>
+            </div>
             <div class="bn-llm-form-actions">
               <button class="bn-setting-btn" id="bn-llm-form-test">测试连接</button>
               <button class="bn-setting-btn bn-btn-primary" id="bn-llm-form-save">保存</button>
@@ -553,6 +558,7 @@
             <span class="bn-llm-item-name">${escapeHtml(c.name || '未命名')}</span>
             <span class="bn-llm-item-model">${escapeHtml(c.model || '')}</span>
             ${active ? '<span class="bn-llm-item-badge">已启用</span>' : ''}
+            ${c.thinking ? '<span class="bn-llm-item-badge bn-llm-item-badge-thinking" title="已开启思考模式">思考</span>' : ''}
             ${testStatus}
           </div>
           <div class="bn-llm-item-actions">
@@ -574,6 +580,7 @@
     panelEl.querySelector('#bn-llm-form-base').value = config?.apiBase || '';
     panelEl.querySelector('#bn-llm-form-key').value = config?.apiKey || '';
     panelEl.querySelector('#bn-llm-form-model').value = config?.model || '';
+    panelEl.querySelector('#bn-llm-form-thinking').checked = !!config?.thinking;
     formEl.style.display = '';
     panelEl.querySelector('#bn-llm-form-name').focus();
   }
@@ -656,6 +663,7 @@
       const apiBase = panelEl.querySelector('#bn-llm-form-base').value.trim().replace(/\/+$/, '');
       const apiKey = panelEl.querySelector('#bn-llm-form-key').value.trim();
       const model = panelEl.querySelector('#bn-llm-form-model').value.trim();
+      const thinking = !!panelEl.querySelector('#bn-llm-form-thinking').checked;
       if (!apiBase) { showToast('请填写 API 地址'); return; }
       if (!model) { showToast('请填写模型ID'); return; }
 
@@ -663,11 +671,11 @@
       const configs = s.llmConfigs || [];
       if (llmEditingId) {
         const config = configs.find(c => c.id === llmEditingId);
-        if (config) Object.assign(config, { name: name || model, apiBase, apiKey, model });
+        if (config) Object.assign(config, { name: name || model, apiBase, apiKey, model, thinking });
       } else {
         const config = {
           id: 'llm_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
-          name: name || model, apiBase, apiKey, model
+          name: name || model, apiBase, apiKey, model, thinking
         };
         configs.push(config);
         // 首个配置保存后自动启用，减少一次手动操作

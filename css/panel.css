@@ -1151,6 +1151,22 @@
   flex-shrink: 0;
 }
 
+/* 思考模式徽标：区别于「已启用」的绿色 */
+.bn-llm-item-badge-thinking {
+  background: #e8f0fe;
+  color: #1a56c4;
+}
+
+/* LLM 表单内的思考开关行 */
+.bn-llm-form-thinking {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  font-size: 0.9em;
+  color: var(--bn-text-sub);
+}
+
 /* LLM 测试结果显示在配置首行右侧 */
 .bn-llm-test-status {
   margin-left: auto;

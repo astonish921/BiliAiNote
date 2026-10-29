@@ -551,10 +551,11 @@ async function aiGetConfig() {
           apiBase: String(active.apiBase || '').replace(/\/+$/, ''),
           apiKey: active.apiKey || '',
           model: active.model || '',
-          name: active.name || ''
+          name: active.name || '',
+          thinking: !!active.thinking
         });
       } else {
-        resolve({ apiBase: '', apiKey: '', model: '', name: '' });
+        resolve({ apiBase: '', apiKey: '', model: '', name: '', thinking: false });
       }
     });
   });
@@ -739,7 +740,7 @@ async function aiHandleGenerate(requestId, sceneId, content, senderTabId, prompt
   };
 
   try {
-    const { apiBase, apiKey, model } = await aiGetConfig();
+    const { apiBase, apiKey, model, thinking } = await aiGetConfig();
     if (!apiBase) {
       throw new Error('未启用 LLM 配置，请在「设置」中添加并启用');
     }
@@ -747,6 +748,12 @@ async function aiHandleGenerate(requestId, sceneId, content, senderTabId, prompt
     const systemPrompt = (typeof promptOverride === 'string' && promptOverride.trim())
       ? promptOverride
       : (AI_SCENE_PROMPTS[sceneId] || AI_SCENE_PROMPTS.M001);
+
+    // 思考模式开关：两种参数风格同时携带以兼容各家网关
+    // （七牛等 Anthropic 风格认 thinking.type；阿里系认 enable_thinking，互不干扰）
+    const thinkingParams = thinking
+      ? { thinking: { type: 'enabled' }, enable_thinking: true }
+      : { thinking: { type: 'disabled' }, enable_thinking: false };
 
     const resp = await fetch(`${apiBase}/chat/completions`, {
       method: 'POST',
@@ -761,6 +768,7 @@ async function aiHandleGenerate(requestId, sceneId, content, senderTabId, prompt
           { role: 'user', content },
         ],
         stream: true,
+        ...thinkingParams,
       }),
       signal: abortCtrl.signal,
     });
